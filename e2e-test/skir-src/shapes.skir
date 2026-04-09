@@ -11,6 +11,16 @@ struct Color {
   b: int32;
 }
 
+/// A triangle with a color and three corners.
+struct Triangle {
+  color: Color;
+  /// A corner of the triangle.
+  struct Corner {
+    point: Point;
+  }
+  corners: [Corner];
+}
+
 /// A day of the week.
 enum Weekday {
   MONDAY;

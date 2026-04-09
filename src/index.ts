@@ -1,8 +1,7 @@
 import {
   type CodeGenerator,
-  type RecordKey,
-  type RecordLocation,
   type Module,
+  type RecordLocation,
   convertCase,
 } from "skir-internal";
 import { z } from "zod";
@@ -16,12 +15,11 @@ class ZigCodeGenerator implements CodeGenerator<Config> {
   readonly configType = Config;
 
   generateCode(input: CodeGenerator.Input<Config>): CodeGenerator.Output {
-    const { recordMap } = input;
     const outputFiles: CodeGenerator.OutputFile[] = [];
     for (const module of input.modules) {
       outputFiles.push({
         path: modulePathToOutputPath(module.path),
-        code: new ZigSourceFileGenerator(module, recordMap).generate(),
+        code: new ZigSourceFileGenerator(module).generate(),
       });
     }
     return { files: outputFiles };
@@ -39,21 +37,35 @@ function modulePathToOutputPath(modulePath: string): string {
     .replace(/\.skir$/, ".zig");
 }
 
-/** Returns the UpperCamel type name for a record, qualified with ancestor names. */
-function getTypeName(record: RecordLocation): string {
-  return record.recordAncestors
-    .map((r) => convertCase(r.name.text, "UpperCamel"))
-    .join("_");
-}
-
 // Generates the code for one Zig file.
 class ZigSourceFileGenerator {
   private readonly parts: string[] = [];
 
-  constructor(
-    private readonly inModule: Module,
-    private readonly _recordMap: ReadonlyMap<RecordKey, RecordLocation>,
-  ) {}
+  /**
+   * Maps each Record object to its direct-child RecordLocations.
+   * The key `null` holds top-level records (no parent).
+   *
+   * `module.records` is depth-first (children before parents), but we only
+   * need grouping here — siblings retain their declaration order because
+   * depth-first visits them in the same order they were declared.
+   */
+  private readonly childrenOf: Map<
+    RecordLocation["record"] | null,
+    RecordLocation[]
+  > = new Map();
+
+  constructor(private readonly inModule: Module) {
+    for (const loc of inModule.records) {
+      const ancestors = loc.recordAncestors;
+      // recordAncestors includes the record itself as the last element, so
+      // the parent is at index length-2 (or null for top-level records).
+      const parentRecord =
+        ancestors.length > 1 ? (ancestors[ancestors.length - 2] ?? null) : null;
+      const siblings = this.childrenOf.get(parentRecord) ?? [];
+      siblings.push(loc);
+      this.childrenOf.set(parentRecord, siblings);
+    }
+  }
 
   generate(): string {
     // http://patorjk.com/software/taag/#f=Doom&t=Do%20not%20edit
@@ -71,16 +83,28 @@ class ZigSourceFileGenerator {
 `,
     );
 
-    for (const record of this.inModule.records) {
-      const typeName = getTypeName(record);
-      if (record.record.recordType === "struct") {
-        this.push(`pub const ${typeName} = struct {};\n`);
-      } else {
-        this.push(`pub const ${typeName} = union(enum) {};\n`);
-      }
+    for (const loc of this.childrenOf.get(null) ?? []) {
+      this.writeRecord(loc, "");
     }
 
     return this.parts.join("");
+  }
+
+  private writeRecord(loc: RecordLocation, indent: string): void {
+    const name = convertCase(loc.record.name.text, "UpperCamel");
+    const children = this.childrenOf.get(loc.record) ?? [];
+    const keyword =
+      loc.record.recordType === "struct" ? "struct" : "union(enum)";
+
+    if (children.length === 0) {
+      this.push(`${indent}pub const ${name} = ${keyword} {};\n`);
+    } else {
+      this.push(`${indent}pub const ${name} = ${keyword} {\n`);
+      for (const child of children) {
+        this.writeRecord(child, indent + "    ");
+      }
+      this.push(`${indent}};\n`);
+    }
   }
 
   private push(...parts: string[]): void {
