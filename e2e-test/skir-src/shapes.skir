@@ -1,0 +1,23 @@
+/// A point in 2D space.
+struct Point {
+  x: int32;
+  y: int32;
+}
+
+/// A color in the RGB color space.
+struct Color {
+  r: int32;
+  g: int32;
+  b: int32;
+}
+
+/// A day of the week.
+enum Weekday {
+  MONDAY;
+  TUESDAY;
+  WEDNESDAY;
+  THURSDAY;
+  FRIDAY;
+  SATURDAY;
+  SUNDAY;
+}
