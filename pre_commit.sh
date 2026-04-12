@@ -7,3 +7,4 @@ npm run lint:fix
 npm run format
 npm run build
 npm run test
+cd e2e-test && zig build test && cd ..
