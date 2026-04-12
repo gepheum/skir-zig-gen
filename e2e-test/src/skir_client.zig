@@ -111,9 +111,11 @@ pub fn Serializer(comptime T: type) type {
         // Each concrete adapter is a zero-size struct, so all behaviour is
         // comptime-constant. The vtable holds plain function pointers with no
         // runtime context pointer.
-        const VTable = struct {
-            serializeFn: *const fn (std.mem.Allocator, T, SerializeFormat) anyerror![]u8,
-            deserializeFn: *const fn (std.mem.Allocator, []const u8, bool) anyerror!T,
+        pub const VTable = struct {
+            toJsonFn: *const fn (std.mem.Allocator, T, ?[]const u8, *std.ArrayList(u8)) anyerror!void,
+            fromJsonFn: *const fn (std.mem.Allocator, std.json.Value, bool) anyerror!T,
+            encodeFn: *const fn (std.mem.Allocator, T, *std.ArrayList(u8)) anyerror!void,
+            decodeFn: *const fn (std.mem.Allocator, *[]const u8, bool) anyerror!T,
             typeDescriptorFn: *const fn () TypeDescriptor,
         };
 
@@ -121,41 +123,36 @@ pub fn Serializer(comptime T: type) type {
         /// `TypeAdapter` interface documented above.
         fn vtableFor(comptime Impl: type) *const VTable {
             return &struct {
-                fn doSerialize(alloc: std.mem.Allocator, value: T, format: SerializeFormat) anyerror![]u8 {
-                    const impl: Impl = .{};
-                    var buf: std.ArrayList(u8) = .empty;
-                    errdefer buf.deinit(alloc);
-                    switch (format) {
-                        .denseJson => try impl.toJson(alloc, value, null, &buf),
-                        .readableJson => try impl.toJson(alloc, value, "\n", &buf),
-                        .binary => {
-                            try buf.appendSlice(alloc, "skir");
-                            try impl.encode(alloc, value, &buf);
-                        },
-                    }
-                    return buf.toOwnedSlice(alloc);
-                }
-
-                fn doDeserialize(alloc: std.mem.Allocator, input: []const u8, keep_unrecognized: bool) anyerror!T {
-                    const impl: Impl = .{};
-                    if (input.len >= 4 and std.mem.eql(u8, input[0..4], "skir")) {
-                        var rest: []const u8 = input[4..];
-                        return impl.decode(alloc, &rest, keep_unrecognized);
-                    } else {
-                        const parsed = try std.json.parseFromSlice(std.json.Value, alloc, input, .{});
-                        defer parsed.deinit();
-                        return impl.fromJson(alloc, parsed.value, keep_unrecognized);
-                    }
-                }
-
                 fn doTypeDescriptor() TypeDescriptor {
                     const impl: Impl = .{};
                     return impl.typeDescriptor();
                 }
 
+                fn doToJson(alloc: std.mem.Allocator, value: T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+                    const impl: Impl = .{};
+                    return impl.toJson(alloc, value, eol, out);
+                }
+
+                fn doFromJson(alloc: std.mem.Allocator, json: std.json.Value, keep: bool) anyerror!T {
+                    const impl: Impl = .{};
+                    return impl.fromJson(alloc, json, keep);
+                }
+
+                fn doEncode(alloc: std.mem.Allocator, value: T, out: *std.ArrayList(u8)) anyerror!void {
+                    const impl: Impl = .{};
+                    return impl.encode(alloc, value, out);
+                }
+
+                fn doDecode(alloc: std.mem.Allocator, input: *[]const u8, keep: bool) anyerror!T {
+                    const impl: Impl = .{};
+                    return impl.decode(alloc, input, keep);
+                }
+
                 const vt: VTable = .{
-                    .serializeFn = doSerialize,
-                    .deserializeFn = doDeserialize,
+                    .toJsonFn = doToJson,
+                    .fromJsonFn = doFromJson,
+                    .encodeFn = doEncode,
+                    .decodeFn = doDecode,
                     .typeDescriptorFn = doTypeDescriptor,
                 };
             }.vt;
@@ -194,7 +191,17 @@ pub fn Serializer(comptime T: type) type {
         pub fn serialize(self: Self, allocator: std.mem.Allocator, value: T, opts: struct {
             format: SerializeFormat = .denseJson,
         }) ![]u8 {
-            return self._vtable.serializeFn(allocator, value, opts.format);
+            var buf: std.ArrayList(u8) = .empty;
+            errdefer buf.deinit(allocator);
+            switch (opts.format) {
+                .denseJson => try self._vtable.toJsonFn(allocator, value, null, &buf),
+                .readableJson => try self._vtable.toJsonFn(allocator, value, "\n", &buf),
+                .binary => {
+                    try buf.appendSlice(allocator, "skir");
+                    try self._vtable.encodeFn(allocator, value, &buf);
+                },
+            }
+            return buf.toOwnedSlice(allocator);
         }
 
         /// Deserializes a value from a JSON string or binary byte slice.
@@ -203,7 +210,14 @@ pub fn Serializer(comptime T: type) type {
         pub fn deserialize(self: Self, allocator: std.mem.Allocator, input: []const u8, opts: struct {
             keepUnrecognizedValues: bool = false,
         }) !T {
-            return self._vtable.deserializeFn(allocator, input, opts.keepUnrecognizedValues);
+            if (input.len >= 4 and std.mem.eql(u8, input[0..4], "skir")) {
+                var rest: []const u8 = input[4..];
+                return self._vtable.decodeFn(allocator, &rest, opts.keepUnrecognizedValues);
+            } else {
+                const parsed = try std.json.parseFromSlice(std.json.Value, allocator, input, .{});
+                defer parsed.deinit();
+                return self._vtable.fromJsonFn(allocator, parsed.value, opts.keepUnrecognizedValues);
+            }
         }
 
         /// Returns the `TypeDescriptor` describing the shape of `T`.
@@ -336,6 +350,24 @@ fn encodeI32(v: i32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anye
     } else {
         try out.append(allocator, 233);
         try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u32, @bitCast(v))));
+    }
+}
+
+/// Encodes a non-negative integer as a variable-length unsigned value used for
+/// array lengths and string/bytes sizes.
+///
+///  0..=231   → single byte equal to the value
+///  232..=65535 → wire 232 + u16 LE
+///  else      → wire 233 + u32 LE
+fn encodeUint32(n: u32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
+    if (n <= 231) {
+        try out.append(allocator, @intCast(n));
+    } else if (n <= 65535) {
+        try out.append(allocator, 232);
+        try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u16, @intCast(n))));
+    } else {
+        try out.append(allocator, 233);
+        try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u32, n)));
     }
 }
 
@@ -684,13 +716,164 @@ pub fn timestampSerializer() Serializer(Timestamp) {
 // =============================================================================
 
 /// Returns a serializer for optional values of type `?T`.
-pub fn optionalSerializer(comptime T: type, _: Serializer(T)) Serializer(?T) {
-    return .{};
+///
+/// `None` encodes as JSON `null` / wire byte `0xFF`.
+/// `Some(v)` delegates to `inner` for both JSON and binary encoding.
+pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(?T) {
+    const ivt = inner._vtable;
+    return Serializer(?T){
+        ._vtable = &struct {
+            fn doTypeDescriptor() TypeDescriptor {
+                // Lazily initialise a static TypeDescriptor for the inner type so
+                // that we can hand out a stable `*const TypeDescriptor` pointer.
+                const S = struct {
+                    var inner_td: TypeDescriptor = undefined;
+                    var ready = false;
+                };
+                if (!S.ready) {
+                    S.inner_td = ivt.typeDescriptorFn();
+                    S.ready = true;
+                }
+                return TypeDescriptor{ .optional = &S.inner_td };
+            }
+
+            fn doToJson(alloc: std.mem.Allocator, value: ?T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+                if (value == null) {
+                    try out.appendSlice(alloc, "null");
+                } else {
+                    try ivt.toJsonFn(alloc, value.?, eol, out);
+                }
+            }
+
+            fn doFromJson(alloc: std.mem.Allocator, json: std.json.Value, keep: bool) anyerror!?T {
+                if (json == .null) return null;
+                return try ivt.fromJsonFn(alloc, json, keep);
+            }
+
+            fn doEncode(alloc: std.mem.Allocator, value: ?T, out: *std.ArrayList(u8)) anyerror!void {
+                if (value == null) {
+                    try out.append(alloc, 255);
+                } else {
+                    try ivt.encodeFn(alloc, value.?, out);
+                }
+            }
+
+            fn doDecode(alloc: std.mem.Allocator, input: *[]const u8, keep: bool) anyerror!?T {
+                if (input.*.len > 0 and input.*[0] == 255) {
+                    input.* = input.*[1..];
+                    return null;
+                }
+                return try ivt.decodeFn(alloc, input, keep);
+            }
+
+            const vt: Serializer(?T).VTable = .{
+                .toJsonFn = doToJson,
+                .fromJsonFn = doFromJson,
+                .encodeFn = doEncode,
+                .decodeFn = doDecode,
+                .typeDescriptorFn = doTypeDescriptor,
+            };
+        }.vt,
+    };
 }
 
 /// Returns a serializer for slice values of type `[]const T`.
-pub fn arraySerializer(comptime T: type, _: Serializer(T)) Serializer([]const T) {
-    return .{};
+///
+/// Dense JSON:    `[v1,v2,...]`
+/// Readable JSON: `[\n  v1,\n  v2\n]`
+/// Wire:  0 items → 0xF6; 1–3 items → 0xF7–0xF9 (no length);
+///        4+ items → 0xFA + encodeUint32(count).
+pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializer([]const T) {
+    const ivt = inner._vtable;
+    return Serializer([]const T){
+        ._vtable = &struct {
+            fn doTypeDescriptor() TypeDescriptor {
+                const S = struct {
+                    var inner_td: TypeDescriptor = undefined;
+                    var ready = false;
+                };
+                if (!S.ready) {
+                    S.inner_td = ivt.typeDescriptorFn();
+                    S.ready = true;
+                }
+                return TypeDescriptor{ .array = .{ .item_type = &S.inner_td, .key_extractor = "" } };
+            }
+
+            fn doToJson(alloc: std.mem.Allocator, value: []const T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+                try out.append(alloc, '[');
+                if (eol) |eol_str| {
+                    // Readable: each item on its own line indented by 2 extra spaces.
+                    var child_eol_buf: [256]u8 = undefined;
+                    const child_eol_len = @min(eol_str.len + 2, child_eol_buf.len);
+                    @memcpy(child_eol_buf[0..eol_str.len], eol_str);
+                    child_eol_buf[eol_str.len] = ' ';
+                    if (eol_str.len + 1 < child_eol_buf.len) child_eol_buf[eol_str.len + 1] = ' ';
+                    const child_eol: []const u8 = child_eol_buf[0..child_eol_len];
+                    for (value, 0..) |item, i| {
+                        try out.appendSlice(alloc, child_eol);
+                        try ivt.toJsonFn(alloc, item, child_eol, out);
+                        if (i + 1 < value.len) try out.append(alloc, ',');
+                    }
+                    if (value.len > 0) try out.appendSlice(alloc, eol_str);
+                } else {
+                    for (value, 0..) |item, i| {
+                        if (i > 0) try out.append(alloc, ',');
+                        try ivt.toJsonFn(alloc, item, null, out);
+                    }
+                }
+                try out.append(alloc, ']');
+            }
+
+            fn doFromJson(alloc: std.mem.Allocator, json: std.json.Value, keep: bool) anyerror![]const T {
+                const arr = switch (json) {
+                    .array => |a| a.items,
+                    else => return alloc.dupe(T, &.{}),
+                };
+                const items = try alloc.alloc(T, arr.len);
+                errdefer alloc.free(items);
+                for (arr, 0..) |v, i| {
+                    items[i] = try ivt.fromJsonFn(alloc, v, keep);
+                }
+                return items;
+            }
+
+            fn doEncode(alloc: std.mem.Allocator, value: []const T, out: *std.ArrayList(u8)) anyerror!void {
+                const n = value.len;
+                if (n <= 3) {
+                    try out.append(alloc, @intCast(246 + n));
+                } else {
+                    try out.append(alloc, 250);
+                    try encodeUint32(@intCast(n), alloc, out);
+                }
+                for (value) |item| {
+                    try ivt.encodeFn(alloc, item, out);
+                }
+            }
+
+            fn doDecode(alloc: std.mem.Allocator, input: *[]const u8, keep: bool) anyerror![]const T {
+                const wire = try readU8(input);
+                if (wire == 0 or wire == 246) return alloc.dupe(T, &.{});
+                const n: usize = if (wire == 250)
+                    @intCast(try decodeNumber(input))
+                else
+                    @intCast(wire - 246);
+                const items = try alloc.alloc(T, n);
+                errdefer alloc.free(items);
+                for (0..n) |i| {
+                    items[i] = try ivt.decodeFn(alloc, input, keep);
+                }
+                return items;
+            }
+
+            const vt: Serializer([]const T).VTable = .{
+                .toJsonFn = doToJson,
+                .fromJsonFn = doFromJson,
+                .encodeFn = doEncode,
+                .decodeFn = doDecode,
+                .typeDescriptorFn = doTypeDescriptor,
+            };
+        }.vt,
+    };
 }
 
 // =============================================================================
@@ -1967,4 +2150,163 @@ test "timestampSerializer: typeDescriptor is primitive timestamp" {
     const td = timestampSerializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Timestamp, td.primitive);
+}
+
+// =============================================================================
+// Tests — optionalSerializer
+// =============================================================================
+
+test "optionalSerializer: serialize dense none is null" {
+    const alloc = std.testing.allocator;
+    const out = try optionalSerializer(i32, int32Serializer()).serialize(alloc, null, .{});
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("null", out);
+}
+
+test "optionalSerializer: serialize dense some delegates" {
+    const alloc = std.testing.allocator;
+    const out = try optionalSerializer(i32, int32Serializer()).serialize(alloc, @as(?i32, 42), .{});
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("42", out);
+}
+
+test "optionalSerializer: serialize readable none is null" {
+    const alloc = std.testing.allocator;
+    const out = try optionalSerializer(i32, int32Serializer()).serialize(alloc, null, .{ .format = .readableJson });
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("null", out);
+}
+
+test "optionalSerializer: serialize readable some delegates" {
+    const alloc = std.testing.allocator;
+    const out = try optionalSerializer(i32, int32Serializer()).serialize(alloc, @as(?i32, 42), .{ .format = .readableJson });
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("42", out);
+}
+
+test "optionalSerializer: deserialize null is none" {
+    const alloc = std.testing.allocator;
+    const v = try optionalSerializer(i32, int32Serializer()).deserialize(alloc, "null", .{});
+    try std.testing.expectEqual(@as(?i32, null), v);
+}
+
+test "optionalSerializer: deserialize value is some" {
+    const alloc = std.testing.allocator;
+    const v = try optionalSerializer(i32, int32Serializer()).deserialize(alloc, "7", .{});
+    try std.testing.expectEqual(@as(?i32, 7), v);
+}
+
+test "optionalSerializer: binary none is wire 255" {
+    const alloc = std.testing.allocator;
+    const bytes = try optionalSerializer(i32, int32Serializer()).serialize(alloc, null, .{ .format = .binary });
+    defer alloc.free(bytes);
+    try std.testing.expectEqualSlices(u8, "skir\xff", bytes);
+}
+
+test "optionalSerializer: binary some delegates" {
+    const alloc = std.testing.allocator;
+    const bytes = try optionalSerializer(i32, int32Serializer()).serialize(alloc, @as(?i32, 5), .{ .format = .binary });
+    defer alloc.free(bytes);
+    // Some(5): int32 encodes 5 as a single wire byte 5.
+    try std.testing.expectEqualSlices(u8, "skir\x05", bytes);
+}
+
+test "optionalSerializer: binary round-trip" {
+    const alloc = std.testing.allocator;
+    const s = optionalSerializer(i32, int32Serializer());
+    for ([_]?i32{ null, 0, 42, -1 }) |v| {
+        const bytes = try s.serialize(alloc, v, .{ .format = .binary });
+        defer alloc.free(bytes);
+        const got = try s.deserialize(alloc, bytes, .{});
+        try std.testing.expectEqual(v, got);
+    }
+}
+
+test "optionalSerializer: typeDescriptor is optional of int32" {
+    const td = optionalSerializer(i32, int32Serializer()).typeDescriptor();
+    try std.testing.expect(td == .optional);
+    try std.testing.expectEqual(PrimitiveType.Int32, td.optional.primitive);
+}
+
+// =============================================================================
+// Tests — arraySerializer
+// =============================================================================
+
+test "arraySerializer: serialize dense empty" {
+    const alloc = std.testing.allocator;
+    const out = try arraySerializer(i32, int32Serializer()).serialize(alloc, &.{}, .{});
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("[]", out);
+}
+
+test "arraySerializer: serialize dense nonempty" {
+    const alloc = std.testing.allocator;
+    const items = [_]i32{ 1, 2, 3 };
+    const out = try arraySerializer(i32, int32Serializer()).serialize(alloc, &items, .{});
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("[1,2,3]", out);
+}
+
+test "arraySerializer: serialize readable empty" {
+    const alloc = std.testing.allocator;
+    const out = try arraySerializer(i32, int32Serializer()).serialize(alloc, &.{}, .{ .format = .readableJson });
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("[]", out);
+}
+
+test "arraySerializer: serialize readable nonempty" {
+    const alloc = std.testing.allocator;
+    const items = [_]i32{ 1, 2 };
+    const out = try arraySerializer(i32, int32Serializer()).serialize(alloc, &items, .{ .format = .readableJson });
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("[\n  1,\n  2\n]", out);
+}
+
+test "arraySerializer: deserialize array" {
+    const alloc = std.testing.allocator;
+    const result = try arraySerializer(i32, int32Serializer()).deserialize(alloc, "[10,20,30]", .{});
+    defer alloc.free(result);
+    try std.testing.expectEqualSlices(i32, &.{ 10, 20, 30 }, result);
+}
+
+test "arraySerializer: deserialize null is empty" {
+    const alloc = std.testing.allocator;
+    const result = try arraySerializer(i32, int32Serializer()).deserialize(alloc, "null", .{});
+    defer alloc.free(result);
+    try std.testing.expectEqualSlices(i32, &.{}, result);
+}
+
+test "arraySerializer: binary empty is wire 246" {
+    const alloc = std.testing.allocator;
+    const bytes = try arraySerializer(i32, int32Serializer()).serialize(alloc, &.{}, .{ .format = .binary });
+    defer alloc.free(bytes);
+    try std.testing.expectEqualSlices(u8, "skir\xf6", bytes);
+}
+
+test "arraySerializer: binary nonempty wire byte" {
+    const alloc = std.testing.allocator;
+    const items = [_]i32{ 1, 2, 3 };
+    const bytes = try arraySerializer(i32, int32Serializer()).serialize(alloc, &items, .{ .format = .binary });
+    defer alloc.free(bytes);
+    // 3 items → wire 249 (246 + 3), then each int32 as single byte
+    try std.testing.expectEqualSlices(u8, "skir\xf9\x01\x02\x03", bytes);
+}
+
+test "arraySerializer: binary round-trip" {
+    const alloc = std.testing.allocator;
+    const s = arraySerializer(i32, int32Serializer());
+    const cases = [_][]const i32{ &.{}, &.{0}, &.{ 1, 2, 3 }, &.{ -1, 0, 1 } };
+    for (cases) |v| {
+        const bytes = try s.serialize(alloc, v, .{ .format = .binary });
+        defer alloc.free(bytes);
+        const got = try s.deserialize(alloc, bytes, .{});
+        defer alloc.free(got);
+        try std.testing.expectEqualSlices(i32, v, got);
+    }
+}
+
+test "arraySerializer: typeDescriptor is array of int32" {
+    const td = arraySerializer(i32, int32Serializer()).typeDescriptor();
+    try std.testing.expect(td == .array);
+    try std.testing.expectEqual(PrimitiveType.Int32, td.array.item_type.primitive);
 }
