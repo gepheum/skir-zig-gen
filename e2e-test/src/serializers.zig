@@ -754,6 +754,117 @@ pub const Float64Adapter = struct {
 };
 
 // =============================================================================
+// String helpers
+// =============================================================================
+
+/// Writes `s` as a JSON string literal to `out`, escaping `"`, `\`, and
+/// control characters (matching the Rust `write_json_escaped_string`).
+fn writeJsonEscapedString(s: []const u8, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
+    try out.append(allocator, '"');
+    for (s) |c| {
+        switch (c) {
+            '"' => try out.appendSlice(allocator, "\\\""),
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '\r' => try out.appendSlice(allocator, "\\r"),
+            '\t' => try out.appendSlice(allocator, "\\t"),
+            '\x08' => try out.appendSlice(allocator, "\\b"),
+            '\x0C' => try out.appendSlice(allocator, "\\f"),
+            0x00...0x07, 0x0B, 0x0E...0x1F, 0x7F => {
+                var buf: [6]u8 = undefined;
+                const written = std.fmt.bufPrint(&buf, "\\u{x:0>4}", .{c}) catch unreachable;
+                try out.appendSlice(allocator, written);
+            },
+            else => try out.append(allocator, c),
+        }
+    }
+    try out.append(allocator, '"');
+}
+
+/// Copies `bytes` to a newly-allocated slice, replacing any invalid UTF-8
+/// sequences with the replacement character U+FFFD (0xEF 0xBF 0xBD).
+fn utf8LossyDupe(bytes: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    if (std.unicode.utf8ValidateSlice(bytes)) {
+        return allocator.dupe(u8, bytes);
+    }
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(allocator);
+    var i: usize = 0;
+    while (i < bytes.len) {
+        const seq_len = std.unicode.utf8ByteSequenceLength(bytes[i]) catch {
+            try out.appendSlice(allocator, "\xef\xbf\xbd");
+            i += 1;
+            continue;
+        };
+        if (i + seq_len > bytes.len) {
+            try out.appendSlice(allocator, "\xef\xbf\xbd");
+            break;
+        }
+        _ = std.unicode.utf8Decode(bytes[i .. i + seq_len]) catch {
+            try out.appendSlice(allocator, "\xef\xbf\xbd");
+            i += 1;
+            continue;
+        };
+        try out.appendSlice(allocator, bytes[i .. i + seq_len]);
+        i += seq_len;
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+// =============================================================================
+// StringAdapter
+// =============================================================================
+
+/// Concrete adapter for `[]const u8` string values (valid UTF-8).
+///
+/// Dense/readable JSON: a JSON string literal with escaping (same in both modes).
+/// Wire encoding: empty → wire 242; non-empty → wire 243 + encodeUint32(len) + UTF-8 bytes.
+pub const StringAdapter = struct {
+    const Self = @This();
+
+    pub fn isDefault(_: Self, input: []const u8) bool {
+        return input.len == 0;
+    }
+
+    pub fn toJson(_: Self, allocator: std.mem.Allocator, input: []const u8, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+        try writeJsonEscapedString(input, allocator, out);
+    }
+
+    pub fn fromJson(_: Self, allocator: std.mem.Allocator, json: std.json.Value, _: bool) anyerror![]const u8 {
+        return switch (json) {
+            .string => |s| allocator.dupe(u8, s),
+            else => allocator.dupe(u8, &.{}),
+        };
+    }
+
+    pub fn encode(_: Self, allocator: std.mem.Allocator, input: []const u8, out: *std.ArrayList(u8)) anyerror!void {
+        if (input.len == 0) {
+            try out.append(allocator, 242);
+        } else {
+            try out.append(allocator, 243);
+            try encodeUint32(@intCast(input.len), allocator, out);
+            try out.appendSlice(allocator, input);
+        }
+    }
+
+    pub fn decode(_: Self, allocator: std.mem.Allocator, input: *[]const u8, _: bool) anyerror![]const u8 {
+        const wire = try readU8(input);
+        if (wire == 0 or wire == 242) {
+            return allocator.dupe(u8, &.{});
+        }
+        const n: usize = @intCast(try decodeNumber(input));
+        if (input.len < n) return error.UnexpectedEndOfInput;
+        const raw = input.*[0..n];
+        input.* = input.*[n..];
+        return utf8LossyDupe(raw, allocator);
+    }
+
+    pub fn typeDescriptor(_: Self) TypeDescriptor {
+        return TypeDescriptor{ .primitive = .String };
+    }
+};
+
+// =============================================================================
 // Primitive Serializers
 // =============================================================================
 
@@ -778,7 +889,7 @@ pub fn float64Serializer() Serializer(f64) {
     return Serializer(f64).fromAdapter(Float64Adapter);
 }
 pub fn stringSerializer() Serializer([]const u8) {
-    return .{};
+    return Serializer([]const u8).fromAdapter(StringAdapter);
 }
 pub fn bytesSerializer() Serializer([]const u8) {
     return Serializer([]const u8).fromAdapter(BytesAdapter);
@@ -2775,4 +2886,109 @@ test "float64Serializer: typeDescriptor is primitive float64" {
     const td = float64Serializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Float64, td.primitive);
+}
+
+// =============================================================================
+// stringSerializer tests
+// =============================================================================
+
+test "stringSerializer: serialize plain string" {
+    const alloc = std.testing.allocator;
+    const s = try stringSerializer().serialize(alloc, "hello", .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"hello\"", s);
+}
+
+test "stringSerializer: serialize empty" {
+    const alloc = std.testing.allocator;
+    const s = try stringSerializer().serialize(alloc, "", .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"\"", s);
+}
+
+test "stringSerializer: serialize readable is same as dense" {
+    const alloc = std.testing.allocator;
+    const dense = try stringSerializer().serialize(alloc, "hello", .{ .format = .denseJson });
+    defer alloc.free(dense);
+    const readable = try stringSerializer().serialize(alloc, "hello", .{ .format = .readableJson });
+    defer alloc.free(readable);
+    try std.testing.expectEqualStrings(dense, readable);
+}
+
+test "stringSerializer: serialize escapes quote and backslash" {
+    const alloc = std.testing.allocator;
+    const s = try stringSerializer().serialize(alloc, "say \"hi\" \\n", .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"say \\\"hi\\\" \\\\n\"", s);
+}
+
+test "stringSerializer: serialize escapes control characters" {
+    const alloc = std.testing.allocator;
+    const s = try stringSerializer().serialize(alloc, "\x00\n\r\t\x08\x0C\x1B", .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"\\u0000\\n\\r\\t\\b\\f\\u001b\"", s);
+}
+
+test "stringSerializer: deserialize string" {
+    const alloc = std.testing.allocator;
+    const result = try stringSerializer().deserialize(alloc, "\"hello\"", .{});
+    defer alloc.free(result);
+    try std.testing.expectEqualStrings("hello", result);
+}
+
+test "stringSerializer: deserialize number is empty" {
+    const alloc = std.testing.allocator;
+    const result = try stringSerializer().deserialize(alloc, "42", .{});
+    defer alloc.free(result);
+    try std.testing.expectEqualSlices(u8, &.{}, result);
+}
+
+test "stringSerializer: deserialize null is empty" {
+    const alloc = std.testing.allocator;
+    const result = try stringSerializer().deserialize(alloc, "null", .{});
+    defer alloc.free(result);
+    try std.testing.expectEqualSlices(u8, &.{}, result);
+}
+
+test "stringSerializer: binary empty is wire 242" {
+    const alloc = std.testing.allocator;
+    const bytes = try stringSerializer().serialize(alloc, "", .{ .format = .binary });
+    defer alloc.free(bytes);
+    try std.testing.expectEqualSlices(u8, "skir\xf2", bytes);
+}
+
+test "stringSerializer: binary nonempty is wire 243 + length + utf8" {
+    const alloc = std.testing.allocator;
+    const bytes = try stringSerializer().serialize(alloc, "hello", .{ .format = .binary });
+    defer alloc.free(bytes);
+    try std.testing.expectEqualSlices(u8, "skir\xf3\x05hello", bytes);
+}
+
+test "stringSerializer: binary round-trip" {
+    const alloc = std.testing.allocator;
+    const s = stringSerializer();
+    const cases = [_][]const u8{ "", "hello", "Unicode: \xe2\x9c\x93", "a" ** 300 };
+    for (cases) |str| {
+        const bytes = try s.serialize(alloc, str, .{ .format = .binary });
+        defer alloc.free(bytes);
+        const got = try s.deserialize(alloc, bytes, .{});
+        defer alloc.free(got);
+        try std.testing.expectEqualStrings(str, got);
+    }
+}
+
+test "stringSerializer: decode invalid utf8 replaced with U+FFFD" {
+    const alloc = std.testing.allocator;
+    // Manually craft a binary payload with invalid UTF-8 byte 0xFF
+    const payload = "skir\xf3\x01\xff";
+    const result = try stringSerializer().deserialize(alloc, payload, .{});
+    defer alloc.free(result);
+    // 0xFF is not valid UTF-8; should be replaced with U+FFFD = EF BF BD
+    try std.testing.expectEqualSlices(u8, "\xef\xbf\xbd", result);
+}
+
+test "stringSerializer: typeDescriptor is primitive string" {
+    const td = stringSerializer().typeDescriptor();
+    try std.testing.expect(td == .primitive);
+    try std.testing.expectEqual(PrimitiveType.String, td.primitive);
 }
