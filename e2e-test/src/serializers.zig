@@ -1,33 +1,7 @@
 const std = @import("std");
 
-// =============================================================================
-// UnrecognizedFields
-// =============================================================================
-
-/// Holds raw field data encountered during deserialization that does not
-/// correspond to any declared field in the struct.
-///
-/// Every generated struct has a `_unrecognized: ?UnrecognizedFields = null`
-/// field. Assign it `null` when constructing a struct — the deserializer fills
-/// it in automatically when needed. You never need to read or write this field
-/// in normal usage.
-pub const UnrecognizedFields = struct {
-    // The real library stores raw deserialized field bytes here.
-    // This stub is a placeholder — instances are never created directly by
-    // user code (the `_unrecognized` field always starts as null).
-};
-
-// =============================================================================
-// Timestamp
-// =============================================================================
-
-/// An instant in time, represented as milliseconds since the Unix epoch.
-pub const Timestamp = struct {
-    unix_millis: i64 = 0,
-
-    /// The Unix epoch (1970-01-01T00:00:00Z).
-    pub const epoch: Timestamp = .{};
-};
+pub const Timestamp = @import("timestamp.zig").Timestamp;
+pub const UnrecognizedFields = @import("unrecognized.zig").UnrecognizedFields;
 
 // =============================================================================
 // Serializer
