@@ -30,59 +30,6 @@ pub const Timestamp = struct {
 };
 
 // =============================================================================
-// TypeAdapter
-// =============================================================================
-
-/// Internal interface implemented by every concrete adapter
-/// (primitive, array, optional, struct, enum).
-///
-/// `Impl` must be a struct type with the following methods:
-///   - `fn isDefault(self: Impl, input: T) bool`
-///   - `fn toJson(self: Impl, allocator: std.mem.Allocator, input: T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void`
-///   - `fn fromJson(self: Impl, allocator: std.mem.Allocator, json: std.json.Value, keep_unrecognized: bool) anyerror!T`
-///   - `fn encode(self: Impl, allocator: std.mem.Allocator, input: T, out: *std.ArrayList(u8)) anyerror!void`
-///   - `fn decode(self: Impl, allocator: std.mem.Allocator, input: *[]const u8, keep_unrecognized: bool) anyerror!T`
-///   - `fn typeDescriptor(self: Impl) TypeDescriptor`
-///
-/// For internal use by Serializer and concrete adapter implementations.
-pub fn TypeAdapter(comptime T: type, comptime Impl: type) type {
-    // Verify the implementation provides the required methods at comptime.
-    comptime {
-        const impl_info = @typeInfo(Impl);
-        _ = impl_info; // existence check; method validation happens via usage
-    }
-    return struct {
-        impl: Impl,
-
-        const Self = @This();
-
-        pub fn isDefault(self: Self, input: T) bool {
-            return self.impl.isDefault(input);
-        }
-
-        pub fn toJson(self: Self, allocator: std.mem.Allocator, input: T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
-            return self.impl.toJson(allocator, input, eol_indent, out);
-        }
-
-        pub fn fromJson(self: Self, allocator: std.mem.Allocator, json: std.json.Value, keep_unrecognized: bool) anyerror!T {
-            return self.impl.fromJson(allocator, json, keep_unrecognized);
-        }
-
-        pub fn encode(self: Self, allocator: std.mem.Allocator, input: T, out: *std.ArrayList(u8)) anyerror!void {
-            return self.impl.encode(allocator, input, out);
-        }
-
-        pub fn decode(self: Self, allocator: std.mem.Allocator, input: *[]const u8, keep_unrecognized: bool) anyerror!T {
-            return self.impl.decode(allocator, input, keep_unrecognized);
-        }
-
-        pub fn typeDescriptorMethod(self: Self) TypeDescriptor {
-            return self.impl.typeDescriptor();
-        }
-    };
-}
-
-// =============================================================================
 // Serializer
 // =============================================================================
 
@@ -119,8 +66,6 @@ pub fn Serializer(comptime T: type) type {
             typeDescriptorFn: *const fn () TypeDescriptor,
         };
 
-        /// Builds a static `VTable` for `Impl`. `Impl` must satisfy the
-        /// `TypeAdapter` interface documented above.
         fn vtableFor(comptime Impl: type) *const VTable {
             return &struct {
                 fn doTypeDescriptor() TypeDescriptor {
