@@ -623,6 +623,137 @@ pub const TimestampAdapter = struct {
 };
 
 // =============================================================================
+// Float helpers
+// =============================================================================
+
+/// Returns the TypeScript-compatible string for NaN / ±Infinity.
+fn floatSpecialString(f: f64) []const u8 {
+    if (std.math.isNan(f)) return "NaN";
+    if (f > 0) return "Infinity";
+    return "-Infinity";
+}
+
+// =============================================================================
+// Float32Adapter
+// =============================================================================
+
+/// Concrete adapter for `f32` values.
+///
+/// Dense/readable JSON: finite values as shortest round-trip decimal; NaN/±Inf
+/// as quoted strings `"NaN"`, `"Infinity"`, `"-Infinity"`.
+/// Wire encoding: 0.0 → wire 0; else wire 240 + f32 bits as 4 LE bytes.
+pub const Float32Adapter = struct {
+    const Self = @This();
+
+    pub fn isDefault(_: Self, input: f32) bool {
+        return input == 0.0;
+    }
+
+    pub fn toJson(_: Self, allocator: std.mem.Allocator, input: f32, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+        if (std.math.isInf(input) or std.math.isNan(input)) {
+            try out.append(allocator, '"');
+            try out.appendSlice(allocator, floatSpecialString(@floatCast(input)));
+            try out.append(allocator, '"');
+        } else {
+            var buf: [64]u8 = undefined;
+            const s = std.fmt.bufPrint(&buf, "{}", .{input}) catch unreachable;
+            try out.appendSlice(allocator, s);
+        }
+    }
+
+    pub fn fromJson(_: Self, _: std.mem.Allocator, json: std.json.Value, _: bool) anyerror!f32 {
+        return switch (json) {
+            .float => |f| @floatCast(f),
+            .integer => |n| @floatFromInt(n),
+            .string => |s| std.fmt.parseFloat(f32, s) catch 0.0,
+            else => 0.0,
+        };
+    }
+
+    pub fn encode(_: Self, allocator: std.mem.Allocator, input: f32, out: *std.ArrayList(u8)) anyerror!void {
+        if (input == 0.0) {
+            try out.append(allocator, 0);
+        } else {
+            try out.append(allocator, 240);
+            try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u32, @bitCast(input))));
+        }
+    }
+
+    pub fn decode(_: Self, _: std.mem.Allocator, input: *[]const u8, _: bool) anyerror!f32 {
+        const wire = try readU8(input);
+        if (wire == 240) {
+            return @bitCast(try readU32Le(input));
+        } else {
+            return @floatFromInt(try decodeNumberBody(wire, input));
+        }
+    }
+
+    pub fn typeDescriptor(_: Self) TypeDescriptor {
+        return TypeDescriptor{ .primitive = .Float32 };
+    }
+};
+
+// =============================================================================
+// Float64Adapter
+// =============================================================================
+
+/// Concrete adapter for `f64` values.
+///
+/// Dense/readable JSON: finite values as shortest round-trip decimal; NaN/±Inf
+/// as quoted strings `"NaN"`, `"Infinity"`, `"-Infinity"`.
+/// Wire encoding: 0.0 → wire 0; else wire 241 + f64 bits as 8 LE bytes.
+pub const Float64Adapter = struct {
+    const Self = @This();
+
+    pub fn isDefault(_: Self, input: f64) bool {
+        return input == 0.0;
+    }
+
+    pub fn toJson(_: Self, allocator: std.mem.Allocator, input: f64, _: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+        if (std.math.isInf(input) or std.math.isNan(input)) {
+            try out.append(allocator, '"');
+            try out.appendSlice(allocator, floatSpecialString(input));
+            try out.append(allocator, '"');
+        } else {
+            var buf: [64]u8 = undefined;
+            const s = std.fmt.bufPrint(&buf, "{}", .{input}) catch unreachable;
+            try out.appendSlice(allocator, s);
+        }
+    }
+
+    pub fn fromJson(_: Self, _: std.mem.Allocator, json: std.json.Value, _: bool) anyerror!f64 {
+        return switch (json) {
+            .float => |f| f,
+            .integer => |n| @floatFromInt(n),
+            .string => |s| std.fmt.parseFloat(f64, s) catch 0.0,
+            else => 0.0,
+        };
+    }
+
+    pub fn encode(_: Self, allocator: std.mem.Allocator, input: f64, out: *std.ArrayList(u8)) anyerror!void {
+        if (input == 0.0) {
+            try out.append(allocator, 0);
+        } else {
+            try out.append(allocator, 241);
+            try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u64, @bitCast(input))));
+        }
+    }
+
+    pub fn decode(_: Self, _: std.mem.Allocator, input: *[]const u8, _: bool) anyerror!f64 {
+        const wire = try readU8(input);
+        if (wire == 241) {
+            return @bitCast(try readU64Le(input));
+        } else {
+            return @floatFromInt(try decodeNumberBody(wire, input));
+        }
+    }
+
+    pub fn typeDescriptor(_: Self) TypeDescriptor {
+        return TypeDescriptor{ .primitive = .Float64 };
+    }
+};
+
+// =============================================================================
 // Primitive Serializers
 // =============================================================================
 
@@ -641,10 +772,10 @@ pub fn hash64Serializer() Serializer(u64) {
     return Serializer(u64).fromAdapter(Hash64Adapter);
 }
 pub fn float32Serializer() Serializer(f32) {
-    return .{};
+    return Serializer(f32).fromAdapter(Float32Adapter);
 }
 pub fn float64Serializer() Serializer(f64) {
-    return .{};
+    return Serializer(f64).fromAdapter(Float64Adapter);
 }
 pub fn stringSerializer() Serializer([]const u8) {
     return .{};
@@ -2456,4 +2587,192 @@ test "bytesSerializer: typeDescriptor is primitive bytes" {
     const td = bytesSerializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Bytes, td.primitive);
+}
+
+// =============================================================================
+// float32Serializer tests
+// =============================================================================
+
+test "float32Serializer: serialize zero" {
+    const alloc = std.testing.allocator;
+    const s = try float32Serializer().serialize(alloc, 0.0, .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("0", s);
+}
+
+test "float32Serializer: serialize finite" {
+    const alloc = std.testing.allocator;
+    const s = try float32Serializer().serialize(alloc, 1.5, .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("1.5", s);
+}
+
+test "float32Serializer: serialize NaN" {
+    const alloc = std.testing.allocator;
+    const s = try float32Serializer().serialize(alloc, std.math.nan(f32), .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"NaN\"", s);
+}
+
+test "float32Serializer: serialize Infinity" {
+    const alloc = std.testing.allocator;
+    const s = try float32Serializer().serialize(alloc, std.math.inf(f32), .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"Infinity\"", s);
+}
+
+test "float32Serializer: serialize -Infinity" {
+    const alloc = std.testing.allocator;
+    const s = try float32Serializer().serialize(alloc, -std.math.inf(f32), .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"-Infinity\"", s);
+}
+
+test "float32Serializer: deserialize number" {
+    const alloc = std.testing.allocator;
+    try std.testing.expectEqual(@as(f32, 1.5), try float32Serializer().deserialize(alloc, "1.5", .{}));
+}
+
+test "float32Serializer: deserialize string NaN" {
+    const alloc = std.testing.allocator;
+    const v = try float32Serializer().deserialize(alloc, "\"NaN\"", .{});
+    try std.testing.expect(std.math.isNan(v));
+}
+
+test "float32Serializer: deserialize string Infinity" {
+    const alloc = std.testing.allocator;
+    const v = try float32Serializer().deserialize(alloc, "\"Infinity\"", .{});
+    try std.testing.expectEqual(std.math.inf(f32), v);
+}
+
+test "float32Serializer: deserialize null is zero" {
+    const alloc = std.testing.allocator;
+    try std.testing.expectEqual(@as(f32, 0.0), try float32Serializer().deserialize(alloc, "null", .{}));
+}
+
+test "float32Serializer: binary zero is wire 0" {
+    const alloc = std.testing.allocator;
+    const bytes = try float32Serializer().serialize(alloc, 0.0, .{ .format = .binary });
+    defer alloc.free(bytes);
+    try std.testing.expectEqualSlices(u8, "skir\x00", bytes);
+}
+
+test "float32Serializer: binary nonzero is wire 240 + LE bits" {
+    const alloc = std.testing.allocator;
+    const bytes = try float32Serializer().serialize(alloc, 1.5, .{ .format = .binary });
+    defer alloc.free(bytes);
+    // 1.5f32 bits = 0x3FC00000, little-endian = 00 00 c0 3f
+    try std.testing.expectEqualSlices(u8, "skir\xf0\x00\x00\xc0\x3f", bytes);
+}
+
+test "float32Serializer: binary round-trip" {
+    const alloc = std.testing.allocator;
+    const s = float32Serializer();
+    const cases = [_]f32{ 0.0, 1.0, -1.0, 1.5, 3.14, std.math.inf(f32), -std.math.inf(f32) };
+    for (cases) |v| {
+        const bytes = try s.serialize(alloc, v, .{ .format = .binary });
+        defer alloc.free(bytes);
+        const got = try s.deserialize(alloc, bytes, .{});
+        try std.testing.expectEqual(v, got);
+    }
+}
+
+test "float32Serializer: typeDescriptor is primitive float32" {
+    const td = float32Serializer().typeDescriptor();
+    try std.testing.expect(td == .primitive);
+    try std.testing.expectEqual(PrimitiveType.Float32, td.primitive);
+}
+
+// =============================================================================
+// float64Serializer tests
+// =============================================================================
+
+test "float64Serializer: serialize zero" {
+    const alloc = std.testing.allocator;
+    const s = try float64Serializer().serialize(alloc, 0.0, .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("0", s);
+}
+
+test "float64Serializer: serialize finite" {
+    const alloc = std.testing.allocator;
+    const s = try float64Serializer().serialize(alloc, 1.5, .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("1.5", s);
+}
+
+test "float64Serializer: serialize NaN" {
+    const alloc = std.testing.allocator;
+    const s = try float64Serializer().serialize(alloc, std.math.nan(f64), .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"NaN\"", s);
+}
+
+test "float64Serializer: serialize Infinity" {
+    const alloc = std.testing.allocator;
+    const s = try float64Serializer().serialize(alloc, std.math.inf(f64), .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"Infinity\"", s);
+}
+
+test "float64Serializer: serialize -Infinity" {
+    const alloc = std.testing.allocator;
+    const s = try float64Serializer().serialize(alloc, -std.math.inf(f64), .{});
+    defer alloc.free(s);
+    try std.testing.expectEqualStrings("\"-Infinity\"", s);
+}
+
+test "float64Serializer: deserialize number" {
+    const alloc = std.testing.allocator;
+    try std.testing.expectEqual(@as(f64, 1.5), try float64Serializer().deserialize(alloc, "1.5", .{}));
+}
+
+test "float64Serializer: deserialize string NaN" {
+    const alloc = std.testing.allocator;
+    const v = try float64Serializer().deserialize(alloc, "\"NaN\"", .{});
+    try std.testing.expect(std.math.isNan(v));
+}
+
+test "float64Serializer: deserialize string Infinity" {
+    const alloc = std.testing.allocator;
+    const v = try float64Serializer().deserialize(alloc, "\"Infinity\"", .{});
+    try std.testing.expectEqual(std.math.inf(f64), v);
+}
+
+test "float64Serializer: deserialize null is zero" {
+    const alloc = std.testing.allocator;
+    try std.testing.expectEqual(@as(f64, 0.0), try float64Serializer().deserialize(alloc, "null", .{}));
+}
+
+test "float64Serializer: binary zero is wire 0" {
+    const alloc = std.testing.allocator;
+    const bytes = try float64Serializer().serialize(alloc, 0.0, .{ .format = .binary });
+    defer alloc.free(bytes);
+    try std.testing.expectEqualSlices(u8, "skir\x00", bytes);
+}
+
+test "float64Serializer: binary nonzero is wire 241 + LE bits" {
+    const alloc = std.testing.allocator;
+    const bytes = try float64Serializer().serialize(alloc, 1.5, .{ .format = .binary });
+    defer alloc.free(bytes);
+    // 1.5f64 bits = 0x3FF8000000000000, little-endian = 00 00 00 00 00 00 f8 3f
+    try std.testing.expectEqualSlices(u8, "skir\xf1\x00\x00\x00\x00\x00\x00\xf8\x3f", bytes);
+}
+
+test "float64Serializer: binary round-trip" {
+    const alloc = std.testing.allocator;
+    const s = float64Serializer();
+    const cases = [_]f64{ 0.0, 1.0, -1.0, 1.5, 3.14, std.math.inf(f64), -std.math.inf(f64) };
+    for (cases) |v| {
+        const bytes = try s.serialize(alloc, v, .{ .format = .binary });
+        defer alloc.free(bytes);
+        const got = try s.deserialize(alloc, bytes, .{});
+        try std.testing.expectEqual(v, got);
+    }
+}
+
+test "float64Serializer: typeDescriptor is primitive float64" {
+    const td = float64Serializer().typeDescriptor();
+    try std.testing.expect(td == .primitive);
+    try std.testing.expectEqual(PrimitiveType.Float64, td.primitive);
 }
