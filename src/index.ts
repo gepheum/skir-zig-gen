@@ -1,45 +1,52 @@
+import { posix as pathPosix } from "node:path";
 import {
   type CodeGenerator,
+  type Field,
   type Module,
+  type Record,
+  type RecordKey,
   type RecordLocation,
-  convertCase,
+  type ResolvedType,
 } from "skir-internal";
 import { z } from "zod";
+import {
+  modulePathToImportAlias,
+  modulePathToOutputPath,
+  toFieldGetterName,
+  toStructFieldName,
+  toTypeName,
+  toVariantName,
+} from "./naming.js";
+import { TypeSpeller } from "./type_speller.js";
 
 const Config = z.strictObject({});
 
 type Config = z.infer<typeof Config>;
+
+const GENERATED_UNKNOWN_VARIANT_NAME = "Unknown";
 
 class ZigCodeGenerator implements CodeGenerator<Config> {
   readonly id = "skir-zig-gen";
   readonly configType = Config;
 
   generateCode(input: CodeGenerator.Input<Config>): CodeGenerator.Output {
+    const { recordMap } = input;
     const outputFiles: CodeGenerator.OutputFile[] = [];
     for (const module of input.modules) {
       outputFiles.push({
         path: modulePathToOutputPath(module.path),
-        code: new ZigSourceFileGenerator(module).generate(),
+        code: new ZigSourceFileGenerator(module, recordMap).generate(),
       });
     }
     return { files: outputFiles };
   }
 }
 
-/** Maps a Skir module path to the output .zig file path under skirout/. */
-function modulePathToOutputPath(modulePath: string): string {
-  // e.g. "user.skir"          → "user.zig"
-  //      "vehicles/car.skir"  → "vehicles/car.zig"
-  //      "@ext/foo.skir"      → "external/foo.zig"  (external dependency)
-  return modulePath
-    .replace(/^@/, "external/")
-    .replace(/-/g, "_")
-    .replace(/\.skir$/, ".zig");
-}
-
 // Generates the code for one Zig file.
 class ZigSourceFileGenerator {
   private readonly parts: string[] = [];
+  private readonly typeSpeller: TypeSpeller;
+  private readonly referencedModulePaths = new Set<string>();
 
   /**
    * Maps each Record object to its direct-child RecordLocations.
@@ -54,7 +61,11 @@ class ZigSourceFileGenerator {
     RecordLocation[]
   > = new Map();
 
-  constructor(private readonly inModule: Module) {
+  constructor(
+    private readonly inModule: Module,
+    recordMap: ReadonlyMap<RecordKey, RecordLocation>,
+  ) {
+    this.typeSpeller = new TypeSpeller(recordMap, inModule.path);
     for (const loc of inModule.records) {
       const ancestors = loc.recordAncestors;
       // recordAncestors includes the record itself as the last element, so
@@ -64,6 +75,9 @@ class ZigSourceFileGenerator {
       const siblings = this.childrenOf.get(parentRecord) ?? [];
       siblings.push(loc);
       this.childrenOf.set(parentRecord, siblings);
+    }
+    for (const loc of inModule.records) {
+      this.collectRecordImports(loc.record);
     }
   }
 
@@ -83,6 +97,8 @@ class ZigSourceFileGenerator {
 `,
     );
 
+    this.writeImports();
+
     for (const loc of this.childrenOf.get(null) ?? []) {
       this.writeRecord(loc, "");
     }
@@ -91,19 +107,295 @@ class ZigSourceFileGenerator {
   }
 
   private writeRecord(loc: RecordLocation, indent: string): void {
-    const name = convertCase(loc.record.name.text, "UpperCamel");
-    const children = this.childrenOf.get(loc.record) ?? [];
-    const keyword =
-      loc.record.recordType === "struct" ? "struct" : "union(enum)";
+    if (loc.record.recordType === "struct") {
+      this.writeStruct(loc, indent);
+      return;
+    }
+    this.writeEnum(loc, indent);
+  }
 
-    if (children.length === 0) {
-      this.push(`${indent}pub const ${name} = ${keyword} {};\n`);
+  private writeImports(): void {
+    this.push(
+      `const skir_client = @import(${toZigStringLiteral(
+        relativePathFromModule(this.inModule.path, null),
+      )});\n`,
+    );
+
+    const importedModulePaths = [...this.referencedModulePaths].sort();
+    for (const modulePath of importedModulePaths) {
+      this.push(
+        `const ${modulePathToImportAlias(modulePath)} = @import(${toZigStringLiteral(
+          relativePathFromModule(this.inModule.path, modulePath),
+        )});\n`,
+      );
+    }
+
+    if (importedModulePaths.length > 0) {
+      this.push("\n");
     } else {
-      this.push(`${indent}pub const ${name} = ${keyword} {\n`);
-      for (const child of children) {
-        this.writeRecord(child, indent + "    ");
+      this.push("\n");
+    }
+  }
+
+  private writeStruct(loc: RecordLocation, indent: string): void {
+    const typeName = toTypeName(loc.record.name.text);
+    const children = this.childrenOf.get(loc.record) ?? [];
+
+    this.push(commentify(docToCommentText(loc.record.doc), indent));
+    this.push(`${indent}pub const ${typeName} = struct {\n`);
+    this.push("\n");
+
+    for (const child of children) {
+      this.writeRecord(child, indent + "    ");
+    }
+    if (children.length > 0) {
+      this.push("\n");
+    }
+
+    for (const field of loc.record.fields) {
+      if (field.type?.kind === "array" && field.type.key) {
+        this.writeKeySpec(field, indent + "    ");
       }
-      this.push(`${indent}};\n`);
+    }
+    if (
+      loc.record.fields.some(
+        (field) => field.type?.kind === "array" && field.type.key,
+      )
+    ) {
+      this.push("\n");
+    }
+    for (const field of loc.record.fields) {
+      if (field.isRecursive !== false) {
+        this.writeRecursiveFieldType(field, indent + "    ");
+      }
+    }
+    if (loc.record.fields.some((field) => field.isRecursive !== false)) {
+      this.push("\n");
+    }
+
+    for (const field of loc.record.fields) {
+      this.writeStructField(field, indent + "    ");
+    }
+
+    this.push(
+      `${indent}    _unrecognized: ?skir_client.UnrecognizedFields = null,\n\n`,
+    );
+    this.push(`${indent}    pub const DEFAULT: @This() = .{};\n\n`);
+    this.push(`${indent}    pub fn defaultRef() *const @This() {\n`);
+    this.push(`${indent}        return &@This().DEFAULT;\n`);
+    this.push(`${indent}    }\n`);
+
+    const recursiveFields = loc.record.fields.filter(
+      (field) => field.isRecursive !== false,
+    );
+    if (recursiveFields.length > 0) {
+      this.push("\n");
+      for (const field of recursiveFields) {
+        this.writeRecursiveFieldGetter(field, indent + "    ");
+      }
+    }
+
+    this.push(`${indent}};\n`);
+  }
+
+  private writeEnum(loc: RecordLocation, indent: string): void {
+    const typeName = toTypeName(loc.record.name.text);
+    const children = this.childrenOf.get(loc.record) ?? [];
+    const variantNamesNeedSuffix = doVariantNamesNeedSuffix(loc.record.fields);
+
+    this.push(commentify(docToCommentText(loc.record.doc), indent));
+    this.push(`${indent}pub const ${typeName} = union(enum) {\n`);
+    this.push("\n");
+
+    for (const child of children) {
+      this.writeRecord(child, indent + "    ");
+    }
+    if (children.length > 0) {
+      this.push("\n");
+    }
+
+    this.push(`${indent}    pub const Kind = enum {\n`);
+    this.push(`${indent}        ${GENERATED_UNKNOWN_VARIANT_NAME},\n`);
+    for (const variant of loc.record.fields) {
+      this.push(
+        `${indent}        ${getRenderedVariantName(variant, variantNamesNeedSuffix)},\n`,
+      );
+    }
+    this.push(`${indent}    };\n\n`);
+
+    this.push(
+      `${indent}    pub const DEFAULT: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n\n`,
+    );
+    this.push(`${indent}    pub fn defaultRef() *const @This() {\n`);
+    this.push(`${indent}        return &@This().DEFAULT;\n`);
+    this.push(`${indent}    }\n\n`);
+    this.push(`${indent}    pub fn kind(self: @This()) Kind {\n`);
+    this.push(`${indent}        return switch (self) {\n`);
+    this.push(
+      `${indent}            .${GENERATED_UNKNOWN_VARIANT_NAME} => .${GENERATED_UNKNOWN_VARIANT_NAME},\n`,
+    );
+    for (const variant of loc.record.fields) {
+      const variantName = getRenderedVariantName(
+        variant,
+        variantNamesNeedSuffix,
+      );
+      this.push(`${indent}            .${variantName} => .${variantName},\n`);
+    }
+    this.push(`${indent}        };\n`);
+    this.push(`${indent}    }\n\n`);
+
+    this.push(
+      `${indent}    ${GENERATED_UNKNOWN_VARIANT_NAME}: skir_client.UnrecognizedVariant,\n`,
+    );
+    for (const variant of loc.record.fields) {
+      this.push(commentify(docToCommentText(variant.doc), `${indent}    `));
+      if (variant.type) {
+        const variantType =
+          variant.isRecursive !== false
+            ? `*const ${this.typeSpeller.getZigType(variant.type)}`
+            : this.typeSpeller.getZigType(variant.type, {
+                keyedSpecName: this.getKeySpecName(variant),
+              });
+        this.push(
+          `${indent}    ${getRenderedVariantName(variant, variantNamesNeedSuffix)}: ${variantType},\n`,
+        );
+      } else {
+        this.push(
+          `${indent}    ${getRenderedVariantName(variant, variantNamesNeedSuffix)},\n`,
+        );
+      }
+    }
+    this.push(`${indent}};\n`);
+  }
+
+  private writeStructField(field: Field, indent: string): void {
+    const comment = commentify(docToCommentText(field.doc), indent);
+    const keyedSpecName = this.getKeySpecName(field);
+
+    if (field.isRecursive !== false) {
+      const storageName = this.getRecursiveStorageName(field);
+      this.push(comment);
+      this.push(
+        `${indent}${storageName}: ${this.getRecursiveTypeName(field)} = .default_value,\n\n`,
+      );
+      return;
+    }
+
+    const fieldName = toStructFieldName(field.name.text);
+    const fieldType = this.typeSpeller.getZigType(field.type!, {
+      keyedSpecName,
+    });
+    const defaultExpr = this.typeSpeller.getDefaultExpr(field.type!, {
+      keyedSpecName,
+    });
+    this.push(comment);
+    this.push(`${indent}${fieldName}: ${fieldType} = ${defaultExpr},\n\n`);
+  }
+
+  private writeRecursiveFieldGetter(field: Field, indent: string): void {
+    const getterName = toFieldGetterName(field);
+    const storageName = this.getRecursiveStorageName(field);
+    const keyedSpecName = this.getKeySpecName(field);
+    const returnType = this.typeSpeller.getZigType(field.type!, {
+      keyedSpecName,
+    });
+    const defaultExpr = this.typeSpeller.getDefaultExpr(field.type!, {
+      keyedSpecName,
+    });
+
+    this.push(commentify(docToCommentText(field.doc), indent));
+    this.push(
+      `${indent}pub fn ${getterName}(self: *const @This()) ${returnType} {\n`,
+    );
+    this.push(`${indent}    return switch (self.${storageName}) {\n`);
+    this.push(`${indent}        .default_value => ${defaultExpr},\n`);
+    this.push(`${indent}        .value => |value| value.*,\n`);
+    this.push(`${indent}    };\n`);
+    this.push(`${indent}}\n\n`);
+  }
+
+  private writeRecursiveFieldType(field: Field, indent: string): void {
+    const keyedSpecName = this.getKeySpecName(field);
+    const recursiveTypeName = this.getRecursiveTypeName(field);
+    const rawType = this.typeSpeller.getZigType(field.type!, {
+      keyedSpecName,
+    });
+
+    this.push(`${indent}pub const ${recursiveTypeName} = union(enum) {\n`);
+    this.push(`${indent}    default_value,\n`);
+    this.push(`${indent}    value: *const ${rawType},\n`);
+    this.push(`${indent}};\n\n`);
+  }
+
+  private writeKeySpec(field: Field, indent: string): void {
+    const type = field.type;
+    if (!type || type.kind !== "array" || !type.key) {
+      return;
+    }
+
+    const specName = this.getKeySpecName(field);
+    const valueType = this.typeSpeller.getZigType(type.item);
+    const keyType = this.typeSpeller.getKeyType(type.key.keyType);
+    const keyExpr = this.typeSpeller.getKeyAccessor("item", type.key);
+
+    this.push(`${indent}pub const ${specName} = struct {\n`);
+    this.push(`${indent}    pub const Value = ${valueType};\n`);
+    this.push(`${indent}    pub const Key = ${keyType};\n\n`);
+    this.push(`${indent}    pub fn getGet(item: Value) Key {\n`);
+    this.push(`${indent}        return ${keyExpr};\n`);
+    this.push(`${indent}    }\n\n`);
+    this.push(`${indent}    pub fn defaultValue() *Value {\n`);
+    this.push(`${indent}        return @constCast(Value.defaultRef());\n`);
+    this.push(`${indent}    }\n\n`);
+    this.push(`${indent}    pub fn keyExtractor() []const u8 {\n`);
+    this.push(
+      `${indent}        return ${toZigStringLiteral(
+        type.key.path.map((part) => part.name.text).join("."),
+      )};\n`,
+    );
+    this.push(`${indent}    }\n`);
+    this.push(`${indent}};\n\n`);
+  }
+
+  private getKeySpecName(field: Field): string {
+    return `${toTypeName(field.name.text)}KeySpec`;
+  }
+
+  private getRecursiveStorageName(field: Field): string {
+    return `_${toStructFieldName(field.name.text)}`;
+  }
+
+  private getRecursiveTypeName(field: Field): string {
+    return `${toTypeName(field.name.text)}Recursive`;
+  }
+
+  private collectRecordImports(record: Record): void {
+    for (const field of record.fields) {
+      if (field.type) {
+        this.collectTypeImports(field.type);
+      }
+    }
+  }
+
+  private collectTypeImports(type: ResolvedType): void {
+    switch (type.kind) {
+      case "primitive":
+        return;
+      case "optional":
+        this.collectTypeImports(type.other);
+        return;
+      case "array":
+        this.collectTypeImports(type.item);
+        if (type.key?.keyType.kind === "record") {
+          this.collectTypeImports(type.key.keyType);
+        }
+        return;
+      case "record": {
+        const recordLocation = this.typeSpeller.recordMap.get(type.key)!;
+        if (recordLocation.modulePath !== this.inModule.path) {
+          this.referencedModulePaths.add(recordLocation.modulePath);
+        }
+      }
     }
   }
 
@@ -112,6 +404,61 @@ class ZigSourceFileGenerator {
       this.parts.push(part);
     }
   }
+}
+
+function doVariantNamesNeedSuffix(variants: readonly Field[]): boolean {
+  const seenNames = new Set<string>();
+  for (const variant of variants) {
+    const name = toVariantName(variant.name.text);
+    if (name === GENERATED_UNKNOWN_VARIANT_NAME || seenNames.has(name)) {
+      return true;
+    }
+    seenNames.add(name);
+  }
+  return false;
+}
+
+function getRenderedVariantName(field: Field, suffixNeeded: boolean): string {
+  const baseName = toVariantName(field.name.text);
+  if (!suffixNeeded) {
+    return baseName;
+  }
+  return `${baseName}${field.type ? "Wrapper" : "Const"}`;
+}
+
+function relativePathFromModule(
+  fromModulePath: string,
+  toModulePath: string | null,
+): string {
+  const fromFile = pathPosix.join(
+    "src",
+    "skirout",
+    modulePathToOutputPath(fromModulePath),
+  );
+  const toFile = toModulePath
+    ? pathPosix.join("src", "skirout", modulePathToOutputPath(toModulePath))
+    : pathPosix.join("src", "skir_client.zig");
+  const relative = pathPosix.relative(pathPosix.dirname(fromFile), toFile);
+  return relative.length > 0 ? relative : ".";
+}
+
+function commentify(text: string, indent = ""): string {
+  if (!text) {
+    return "";
+  }
+  return text
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => `${indent}/// ${line.trim()}\n`)
+    .join("");
+}
+
+function docToCommentText(doc: { text: string }): string {
+  return doc.text.trim();
+}
+
+function toZigStringLiteral(input: string): string {
+  return JSON.stringify(input);
 }
 
 export const GENERATOR = new ZigCodeGenerator();

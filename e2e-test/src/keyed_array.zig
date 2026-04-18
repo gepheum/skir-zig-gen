@@ -24,6 +24,13 @@ pub fn KeyedArray(comptime Spec: type) type {
             };
         }
 
+        pub fn empty() Self {
+            return .{
+                .values = @constCast(&[_]T{}),
+                .allocator = std.heap.page_allocator,
+            };
+        }
+
         pub fn deinit(self: *Self) void {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -100,4 +107,28 @@ test "KeyedArray indexes lazily and returns defaults" {
     const fallback = try keyed.findByKeyOrDefault(42);
     try std.testing.expectEqual(@as(i32, -1), fallback.id);
     try std.testing.expectEqual(@as(i32, 0), fallback.value);
+}
+
+test "KeyedArray empty creates an empty container" {
+    const Entry = struct {
+        id: i32,
+    };
+
+    const EntrySpec = struct {
+        pub const Value = Entry;
+        pub const Key = i32;
+
+        pub fn getGet(entry: Entry) i32 {
+            return entry.id;
+        }
+
+        var fallback: Entry = .{ .id = -1 };
+
+        pub fn defaultValue() *Entry {
+            return &fallback;
+        }
+    };
+
+    const keyed = KeyedArray(EntrySpec).empty();
+    try std.testing.expectEqual(@as(usize, 0), keyed.values.len);
 }

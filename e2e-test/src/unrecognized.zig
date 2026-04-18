@@ -14,3 +14,13 @@ pub const UnrecognizedFields = struct {
     // This stub is a placeholder — instances are never created directly by
     // user code (the `_unrecognized` field always starts as null).
 };
+
+// =============================================================================
+// UnrecognizedVariant
+// =============================================================================
+
+/// Holds raw enum payload data encountered during deserialization for an
+/// unrecognized enum variant.
+pub const UnrecognizedVariant = struct {
+    // Placeholder stub for generated UNKNOWN enum variants.
+};

@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const Timestamp = @import("timestamp.zig").Timestamp;
 pub const UnrecognizedFields = @import("unrecognized.zig").UnrecognizedFields;
+pub const UnrecognizedVariant = @import("unrecognized.zig").UnrecognizedVariant;
 const KeyedArray = @import("keyed_array.zig").KeyedArray;
 
 // =============================================================================

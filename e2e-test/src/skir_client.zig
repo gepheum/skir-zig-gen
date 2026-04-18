@@ -1,6 +1,7 @@
 const s = @import("serializers.zig");
 
 pub const UnrecognizedFields = s.UnrecognizedFields;
+pub const UnrecognizedVariant = s.UnrecognizedVariant;
 pub const Timestamp = s.Timestamp;
 pub const SerializeFormat = s.SerializeFormat;
 pub const Serializer = s.Serializer;
