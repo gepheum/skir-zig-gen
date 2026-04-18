@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const Timestamp = @import("timestamp.zig").Timestamp;
 pub const UnrecognizedFields = @import("unrecognized.zig").UnrecognizedFields;
+const KeyedArray = @import("keyed_array.zig").KeyedArray;
 
 // =============================================================================
 // Serializer
@@ -1150,6 +1151,102 @@ pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializ
         }
     };
     return Serializer([]const T).fromAdapter(Adapter);
+}
+
+/// Returns a serializer for keyed arrays (`KeyedArray(Spec)`).
+///
+/// Serialization matches `arraySerializer(Spec.Value, inner)`, while preserving
+/// keyed lookup behavior on the deserialized container.
+pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec.Value)) Serializer(KeyedArray(Spec)) {
+    const Value = Spec.Value;
+    const KArr = KeyedArray(Spec);
+    const ivt = inner._vtable;
+    const key_extractor_name = comptime blk: {
+        if (@hasDecl(Spec, "keyExtractor")) {
+            const decl_ty = @TypeOf(Spec.keyExtractor);
+            if (decl_ty == []const u8) break :blk Spec.keyExtractor;
+            if (@typeInfo(decl_ty) == .@"fn") break :blk Spec.keyExtractor();
+        }
+        break :blk "";
+    };
+
+    const Adapter = struct {
+        pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: KArr, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+            try out.append(alloc, '[');
+            if (eol) |eol_str| {
+                // Readable: each item on its own line, indented 2 more spaces than the parent.
+                var child_buf: [256]u8 = undefined;
+                const child_len = @min(eol_str.len + 2, child_buf.len);
+                @memcpy(child_buf[0..eol_str.len], eol_str);
+                child_buf[eol_str.len] = ' ';
+                if (eol_str.len + 1 < child_buf.len) child_buf[eol_str.len + 1] = ' ';
+                const child_eol: []const u8 = child_buf[0..child_len];
+                for (value.values, 0..) |item, i| {
+                    try out.appendSlice(alloc, child_eol);
+                    try ivt.toJsonFn(alloc, item, child_eol, out);
+                    if (i + 1 < value.values.len) try out.append(alloc, ',');
+                }
+                if (value.values.len > 0) try out.appendSlice(alloc, eol_str);
+            } else {
+                for (value.values, 0..) |item, i| {
+                    if (i > 0) try out.append(alloc, ',');
+                    try ivt.toJsonFn(alloc, item, null, out);
+                }
+            }
+            try out.append(alloc, ']');
+        }
+
+        pub fn fromJson(_: @This(), alloc: std.mem.Allocator, json: std.json.Value, keep: bool) anyerror!KArr {
+            const arr = switch (json) {
+                .array => |a| a.items,
+                else => return KArr.init(alloc, try alloc.dupe(Value, &.{})),
+            };
+            const items = try alloc.alloc(Value, arr.len);
+            errdefer alloc.free(items);
+            for (arr, 0..) |v, i| {
+                items[i] = try ivt.fromJsonFn(alloc, v, keep);
+            }
+            return KArr.init(alloc, items);
+        }
+
+        pub fn encode(_: @This(), alloc: std.mem.Allocator, value: KArr, out: *std.ArrayList(u8)) anyerror!void {
+            const n = value.values.len;
+            if (n <= 3) {
+                try out.append(alloc, @intCast(246 + n));
+            } else {
+                try out.append(alloc, 250);
+                try encodeUint32(@intCast(n), alloc, out);
+            }
+            for (value.values) |item| try ivt.encodeFn(alloc, item, out);
+        }
+
+        pub fn decode(_: @This(), alloc: std.mem.Allocator, input: *[]const u8, keep: bool) anyerror!KArr {
+            const wire = try readU8(input);
+            if (wire == 0 or wire == 246) return KArr.init(alloc, try alloc.dupe(Value, &.{}));
+            const n: usize = if (wire == 250)
+                @intCast(try decodeNumber(input))
+            else
+                @intCast(wire - 246);
+            const items = try alloc.alloc(Value, n);
+            errdefer alloc.free(items);
+            for (0..n) |i| items[i] = try ivt.decodeFn(alloc, input, keep);
+            return KArr.init(alloc, items);
+        }
+
+        pub fn typeDescriptor(_: @This()) TypeDescriptor {
+            const S = struct {
+                var inner_td: TypeDescriptor = undefined;
+                var ready = false;
+            };
+            if (!S.ready) {
+                S.inner_td = ivt.typeDescriptorFn();
+                S.ready = true;
+            }
+            return TypeDescriptor{ .array = .{ .item_type = &S.inner_td, .key_extractor = key_extractor_name } };
+        }
+    };
+
+    return Serializer(KArr).fromAdapter(Adapter);
 }
 
 // =============================================================================
@@ -2585,6 +2682,77 @@ test "arraySerializer: typeDescriptor is array of int32" {
     const td = arraySerializer(i32, int32Serializer()).typeDescriptor();
     try std.testing.expect(td == .array);
     try std.testing.expectEqual(PrimitiveType.Int32, td.array.item_type.primitive);
+}
+
+// =============================================================================
+// Tests — keyedArraySerializer
+// =============================================================================
+
+const TestIntKeyedSpec = struct {
+    pub const Value = i32;
+    pub const Key = i32;
+
+    pub fn getGet(v: i32) i32 {
+        return v;
+    }
+
+    var fallback: i32 = -1;
+
+    pub fn defaultValue() *i32 {
+        return &fallback;
+    }
+
+    pub fn keyExtractor() []const u8 {
+        return "self";
+    }
+};
+
+test "keyedArraySerializer: serialize dense nonempty" {
+    const alloc = std.testing.allocator;
+    var values = [_]i32{ 1, 2, 3 };
+    const keyed = KeyedArray(TestIntKeyedSpec).init(alloc, values[0..]);
+    const out = try keyedArraySerializer(TestIntKeyedSpec, int32Serializer()).serialize(alloc, keyed, .{});
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("[1,2,3]", out);
+}
+
+test "keyedArraySerializer: deserialize and findByKey" {
+    const alloc = std.testing.allocator;
+    var keyed = try keyedArraySerializer(TestIntKeyedSpec, int32Serializer()).deserialize(alloc, "[10,20,30]", .{});
+    defer keyed.deinit();
+    defer alloc.free(keyed.values);
+
+    try std.testing.expectEqualSlices(i32, &.{ 10, 20, 30 }, keyed.values);
+
+    const found = (try keyed.findByKey(20)).?;
+    try std.testing.expectEqual(@as(i32, 20), found.*);
+
+    const missing = try keyed.findByKeyOrDefault(999);
+    try std.testing.expectEqual(@as(i32, -1), missing.*);
+}
+
+test "keyedArraySerializer: binary round-trip" {
+    const alloc = std.testing.allocator;
+    const s = keyedArraySerializer(TestIntKeyedSpec, int32Serializer());
+
+    var source_items = [_]i32{ -1, 0, 1, 2 };
+    const source = KeyedArray(TestIntKeyedSpec).init(alloc, source_items[0..]);
+
+    const bytes = try s.serialize(alloc, source, .{ .format = .binary });
+    defer alloc.free(bytes);
+
+    var decoded = try s.deserialize(alloc, bytes, .{});
+    defer decoded.deinit();
+    defer alloc.free(decoded.values);
+
+    try std.testing.expectEqualSlices(i32, source.values, decoded.values);
+}
+
+test "keyedArraySerializer: typeDescriptor includes key extractor" {
+    const td = keyedArraySerializer(TestIntKeyedSpec, int32Serializer()).typeDescriptor();
+    try std.testing.expect(td == .array);
+    try std.testing.expectEqual(PrimitiveType.Int32, td.array.item_type.primitive);
+    try std.testing.expectEqualStrings("self", td.array.key_extractor);
 }
 
 // =============================================================================

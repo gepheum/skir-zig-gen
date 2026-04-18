@@ -21,6 +21,7 @@ pub const timestampSerializer = s.timestampSerializer;
 pub const BytesAdapter = s.BytesAdapter;
 pub const optionalSerializer = s.optionalSerializer;
 pub const arraySerializer = s.arraySerializer;
+pub const keyedArraySerializer = s.keyedArraySerializer;
 pub const KeyedArray = @import("keyed_array.zig").KeyedArray;
 pub const Method = s.Method;
 pub const PrimitiveType = s.PrimitiveType;
