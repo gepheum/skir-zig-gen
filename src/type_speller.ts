@@ -59,7 +59,7 @@ export class TypeSpeller {
   ): string {
     switch (type.kind) {
       case "record":
-        return `${this.getZigType(type)}.DEFAULT`;
+        return `${this.getZigType(type)}.default`;
       case "array": {
         const keyedSpecName =
           options.keyedSpecName ??

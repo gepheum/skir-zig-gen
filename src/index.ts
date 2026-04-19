@@ -189,7 +189,7 @@ class ZigSourceFileGenerator {
     this.push(
       `${indent}    _unrecognized: ?skir_client.UnrecognizedFields = null,\n\n`,
     );
-    this.push(`${indent}    pub const DEFAULT: @This() = .{\n`);
+    this.push(`${indent}    pub const default: @This() = .{\n`);
     for (const field of loc.record.fields) {
       if (field.isRecursive !== false) {
         this.push(
@@ -253,7 +253,7 @@ class ZigSourceFileGenerator {
     }
 
     this.push(
-      `${indent}    pub const DEFAULT: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n\n`,
+      `${indent}    pub const default: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n\n`,
     );
     if (emitKindEnum) {
       this.push(`${indent}    pub fn kind(self: @This()) Kind {\n`);
@@ -347,7 +347,7 @@ class ZigSourceFileGenerator {
     this.push(`${indent}        return ${keySpec.zigKeyExpr};\n`);
     this.push(`${indent}    }\n\n`);
     this.push(`${indent}    pub fn defaultValue() *Value {\n`);
-    this.push(`${indent}        return @constCast(&Value.DEFAULT);\n`);
+    this.push(`${indent}        return @constCast(&Value.default);\n`);
     this.push(`${indent}    }\n\n`);
     this.push(`${indent}    pub fn keyExtractor() []const u8 {\n`);
     this.push(

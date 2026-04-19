@@ -30,6 +30,9 @@ export function toStructFieldName(input: string): string {
   if (name === "_unrecognized") {
     return "_unrecognized_field";
   }
+  if (name === "default" || name === "serializer") {
+    return `${name}_`;
+  }
   return RESERVED_LOWER_NAMES.has(name) ? `${name}_field` : name;
 }
 
@@ -106,6 +109,7 @@ const RESERVED_LOWER_NAMES = new Set<string>([
 
 const RESERVED_TYPE_NAMES = new Set<string>([
   "AnyType",
+  "default",
   "DEFAULT",
   "Default",
   "Kind",
