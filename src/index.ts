@@ -54,7 +54,7 @@ class ZigCodeGenerator implements CodeGenerator<Config> {
 
 // Generates the code for one Zig file.
 class ZigSourceFileGenerator {
-  private readonly parts: string[] = [];
+  private code = "";
   private readonly typeSpeller: TypeSpeller;
   private readonly keyedArrayContext: KeyedArrayContext;
   private readonly referencedModulePaths = new Set<string>();
@@ -117,18 +117,18 @@ class ZigSourceFileGenerator {
     this.writeImports();
 
     for (const loc of this.childrenOf.get(null) ?? []) {
-      this.writeRecord(loc, "");
+      this.writeRecord(loc);
     }
 
-    return this.parts.join("");
+    return this.joinLinesAndFixFormatting();
   }
 
-  private writeRecord(loc: RecordLocation, indent: string): void {
+  private writeRecord(loc: RecordLocation): void {
     if (loc.record.recordType === "struct") {
-      this.writeStruct(loc, indent);
+      this.writeStruct(loc);
       return;
     }
-    this.writeEnum(loc, indent);
+    this.writeEnum(loc);
   }
 
   private writeImports(): void {
@@ -154,7 +154,7 @@ class ZigSourceFileGenerator {
     }
   }
 
-  private writeStruct(loc: RecordLocation, indent: string): void {
+  private writeStruct(loc: RecordLocation): void {
     const typeName = toTypeName(loc.record.name.text);
     const children = this.childrenOf.get(loc.record) ?? [];
     const keySpecs = this.keyedArrayContext.getKeySpecsForItemStruct(
@@ -162,199 +162,179 @@ class ZigSourceFileGenerator {
       this.typeSpeller,
     );
 
-    this.push(commentify(docToCommentText(loc.record.doc), indent));
-    this.push(`${indent}pub const ${typeName} = struct {\n`);
-    this.push("\n");
+    this.push(commentify(docToCommentText(loc.record.doc)));
+    this.push(`pub const ${typeName} = struct {\n`);
 
     for (const child of children) {
-      this.writeRecord(child, indent + "    ");
-    }
-    if (children.length > 0) {
-      this.push("\n");
+      this.writeRecord(child);
     }
 
     for (const field of loc.record.fields) {
       if (field.isRecursive !== false) {
-        this.writeRecursiveFieldType(field, indent + "    ");
+        this.writeRecursiveFieldType(field);
       }
-    }
-    if (loc.record.fields.some((field) => field.isRecursive !== false)) {
-      this.push("\n");
     }
 
     for (const field of loc.record.fields) {
-      this.writeStructField(field, indent + "    ");
+      this.writeStructField(field);
     }
 
-    this.push(
-      `${indent}    _unrecognized: ?skir_client.UnrecognizedFields = null,\n\n`,
-    );
-    this.push(`${indent}    pub const default: @This() = .{\n`);
+    this.push(`_unrecognized: ?skir_client.UnrecognizedFields = null,\n`);
+    this.push(`pub const default: @This() = .{\n`);
     for (const field of loc.record.fields) {
       if (field.isRecursive !== false) {
         this.push(
-          `${indent}        .${this.getRecursiveStorageName(field)} = .default_value,\n`,
+          `.${this.getRecursiveStorageName(field)} = .default_value,\n`,
         );
       } else {
         this.push(
-          `${indent}        .${toStructFieldName(field.name.text)} = ${this.typeSpeller.getDefaultExpr(field.type!)},\n`,
+          `.${toStructFieldName(field.name.text)} = ${this.typeSpeller.getDefaultExpr(field.type!)},\n`,
         );
       }
     }
-    this.push(`${indent}        ._unrecognized = null,\n`);
-    this.push(`${indent}    };\n\n`);
+    this.push(`._unrecognized = null,\n`);
+    this.push(`};\n`);
 
     const recursiveFields = loc.record.fields.filter(
       (field) => field.isRecursive !== false,
     );
     if (recursiveFields.length > 0) {
-      this.push("\n");
       for (const field of recursiveFields) {
-        this.writeRecursiveFieldGetter(field, indent + "    ");
+        this.writeRecursiveFieldGetter(field);
       }
     }
 
-    this.push(`${indent}};\n`);
+    this.push(`};\n`);
 
     if (keySpecs.length > 0) {
-      this.push("\n");
+      this.push(`\n`);
       for (const keySpec of keySpecs) {
-        this.writeKeySpec(keySpec, indent);
+        this.writeKeySpec(keySpec);
       }
     }
   }
 
-  private writeEnum(loc: RecordLocation, indent: string): void {
+  private writeEnum(loc: RecordLocation): void {
     const typeName = toTypeName(loc.record.name.text);
     const children = this.childrenOf.get(loc.record) ?? [];
     const variantNamesNeedSuffix = doVariantNamesNeedSuffix(loc.record.fields);
     const emitKindEnum = this.keyedArrayContext.isEnumUsedAsKey(loc.record);
 
-    this.push(commentify(docToCommentText(loc.record.doc), indent));
-    this.push(`${indent}pub const ${typeName} = union(enum) {\n`);
-    this.push("\n");
+    this.push(commentify(docToCommentText(loc.record.doc)));
+    this.push(`pub const ${typeName} = union(enum) {\n`);
 
     for (const child of children) {
-      this.writeRecord(child, indent + "    ");
-    }
-    if (children.length > 0) {
-      this.push("\n");
+      this.writeRecord(child);
     }
 
     if (emitKindEnum) {
-      this.push(`${indent}    pub const Kind = enum {\n`);
-      this.push(`${indent}        ${GENERATED_UNKNOWN_VARIANT_NAME},\n`);
+      this.push(`pub const Kind = enum {\n`);
+      this.push(`${GENERATED_UNKNOWN_VARIANT_NAME},\n`);
       for (const variant of loc.record.fields) {
         this.push(
-          `${indent}        ${getRenderedVariantName(variant, variantNamesNeedSuffix)},\n`,
+          `${getRenderedVariantName(variant, variantNamesNeedSuffix)},\n`,
         );
       }
-      this.push(`${indent}    };\n\n`);
+      this.push(`};\n`);
     }
 
     this.push(
-      `${indent}    pub const default: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n\n`,
+      `pub const default: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n`,
     );
     if (emitKindEnum) {
-      this.push(`${indent}    pub fn kind(self: @This()) Kind {\n`);
-      this.push(`${indent}        return switch (self) {\n`);
+      this.push(`pub fn kind(self: @This()) Kind {\n`);
+      this.push(`return switch (self) {\n`);
       this.push(
-        `${indent}            .${GENERATED_UNKNOWN_VARIANT_NAME} => .${GENERATED_UNKNOWN_VARIANT_NAME},\n`,
+        `.${GENERATED_UNKNOWN_VARIANT_NAME} => .${GENERATED_UNKNOWN_VARIANT_NAME},\n`,
       );
       for (const variant of loc.record.fields) {
         const variantName = getRenderedVariantName(
           variant,
           variantNamesNeedSuffix,
         );
-        this.push(`${indent}            .${variantName} => .${variantName},\n`);
+        this.push(`.${variantName} => .${variantName},\n`);
       }
-      this.push(`${indent}        };\n`);
-      this.push(`${indent}    }\n\n`);
+      this.push(`};\n`);
+      this.push(`}\n`);
     }
 
     this.push(
-      `${indent}    ${GENERATED_UNKNOWN_VARIANT_NAME}: skir_client.UnrecognizedVariant,\n`,
+      `${GENERATED_UNKNOWN_VARIANT_NAME}: skir_client.UnrecognizedVariant,\n`,
     );
     for (const variant of loc.record.fields) {
-      this.push(commentify(docToCommentText(variant.doc), `${indent}    `));
+      this.push(commentify(docToCommentText(variant.doc)));
       if (variant.type) {
         const variantType =
           variant.isRecursive !== false
             ? `*const ${this.typeSpeller.getZigType(variant.type)}`
             : this.typeSpeller.getZigType(variant.type);
         this.push(
-          `${indent}    ${getRenderedVariantName(variant, variantNamesNeedSuffix)}: ${variantType},\n`,
+          `${getRenderedVariantName(variant, variantNamesNeedSuffix)}: ${variantType},\n`,
         );
       } else {
         this.push(
-          `${indent}    ${getRenderedVariantName(variant, variantNamesNeedSuffix)},\n`,
+          `${getRenderedVariantName(variant, variantNamesNeedSuffix)},\n`,
         );
       }
     }
-    this.push(`${indent}};\n`);
+    this.push(`};\n`);
   }
 
-  private writeStructField(field: Field, indent: string): void {
-    const comment = commentify(docToCommentText(field.doc), indent);
+  private writeStructField(field: Field): void {
+    const comment = commentify(docToCommentText(field.doc));
 
     if (field.isRecursive !== false) {
       const storageName = this.getRecursiveStorageName(field);
       this.push(comment);
-      this.push(
-        `${indent}${storageName}: ${this.getRecursiveTypeName(field)},\n\n`,
-      );
+      this.push(`${storageName}: ${this.getRecursiveTypeName(field)},\n`);
       return;
     }
 
     const fieldName = toStructFieldName(field.name.text);
     const fieldType = this.typeSpeller.getZigType(field.type!);
     this.push(comment);
-    this.push(`${indent}${fieldName}: ${fieldType},\n\n`);
+    this.push(`${fieldName}: ${fieldType},\n`);
   }
 
-  private writeRecursiveFieldGetter(field: Field, indent: string): void {
+  private writeRecursiveFieldGetter(field: Field): void {
     const getterName = toFieldGetterName(field);
     const storageName = this.getRecursiveStorageName(field);
     const returnType = this.typeSpeller.getZigType(field.type!);
     const defaultExpr = this.typeSpeller.getDefaultExpr(field.type!);
 
-    this.push(commentify(docToCommentText(field.doc), indent));
-    this.push(
-      `${indent}pub fn ${getterName}(self: *const @This()) ${returnType} {\n`,
-    );
-    this.push(`${indent}    return switch (self.${storageName}) {\n`);
-    this.push(`${indent}        .default_value => ${defaultExpr},\n`);
-    this.push(`${indent}        .value => |value| value.*,\n`);
-    this.push(`${indent}    };\n`);
-    this.push(`${indent}}\n\n`);
+    this.push(commentify(docToCommentText(field.doc)));
+    this.push(`pub fn ${getterName}(self: *const @This()) ${returnType} {\n`);
+    this.push(`return switch (self.${storageName}) {\n`);
+    this.push(`.default_value => ${defaultExpr},\n`);
+    this.push(`.value => |value| value.*,\n`);
+    this.push(`};\n`);
+    this.push(`}\n`);
   }
 
-  private writeRecursiveFieldType(field: Field, indent: string): void {
+  private writeRecursiveFieldType(field: Field): void {
     const recursiveTypeName = this.getRecursiveTypeName(field);
     const rawType = this.typeSpeller.getZigType(field.type!);
 
-    this.push(`${indent}pub const ${recursiveTypeName} = union(enum) {\n`);
-    this.push(`${indent}    default_value,\n`);
-    this.push(`${indent}    value: *const ${rawType},\n`);
-    this.push(`${indent}};\n\n`);
+    this.push(`pub const ${recursiveTypeName} = union(enum) {\n`);
+    this.push(`default_value,\n`);
+    this.push(`value: *const ${rawType},\n`);
+    this.push(`};\n`);
   }
 
-  private writeKeySpec(keySpec: KeySpec, indent: string): void {
-    this.push(`${indent}pub const ${keySpec.specName} = struct {\n`);
-    this.push(`${indent}    pub const Value = ${keySpec.valueType};\n`);
-    this.push(`${indent}    pub const Key = ${keySpec.zigKeyType};\n\n`);
-    this.push(`${indent}    pub fn getGet(item: Value) Key {\n`);
-    this.push(`${indent}        return ${keySpec.zigKeyExpr};\n`);
-    this.push(`${indent}    }\n\n`);
-    this.push(`${indent}    pub fn defaultValue() *Value {\n`);
-    this.push(`${indent}        return @constCast(&Value.default);\n`);
-    this.push(`${indent}    }\n\n`);
-    this.push(`${indent}    pub fn keyExtractor() []const u8 {\n`);
-    this.push(
-      `${indent}        return ${toZigStringLiteral(keySpec.keyExtractor)};\n`,
-    );
-    this.push(`${indent}    }\n`);
-    this.push(`${indent}};\n\n`);
+  private writeKeySpec(keySpec: KeySpec): void {
+    this.push(`pub const ${keySpec.specName} = struct {\n`);
+    this.push(`pub const Value = ${keySpec.valueType};\n`);
+    this.push(`pub const Key = ${keySpec.zigKeyType};\n`);
+    this.push(`pub fn getGet(item: Value) Key {\n`);
+    this.push(`return ${keySpec.zigKeyExpr};\n`);
+    this.push(`}\n`);
+    this.push(`pub fn defaultValue() *Value {\n`);
+    this.push(`return @constCast(&Value.default);\n`);
+    this.push(`}\n`);
+    this.push(`pub fn keyExtractor() []const u8 {\n`);
+    this.push(`return ${toZigStringLiteral(keySpec.keyExtractor)};\n`);
+    this.push(`}\n`);
+    this.push(`};\n`);
   }
 
   private getRecursiveStorageName(field: Field): string {
@@ -395,10 +375,110 @@ class ZigSourceFileGenerator {
     }
   }
 
-  private push(...parts: string[]): void {
-    for (const part of parts) {
-      this.parts.push(part);
+  private push(...code: string[]): void {
+    this.code += code.join("");
+  }
+
+  private joinLinesAndFixFormatting(): string {
+    const indentUnit = "  ";
+    let result = "";
+    // The indent at every line is obtained by repeating indentUnit N times,
+    // where N is the length of this array.
+    const contextStack: Array<"{" | "(" | "[" | "<" | ":" | "."> = [];
+    // Returns the last element in `contextStack`.
+    const peakTop = (): string => contextStack.at(-1)!;
+    const getMatchingLeftBracket = (r: "}" | ")" | "]" | ">"): string => {
+      switch (r) {
+        case "}":
+          return "{";
+        case ")":
+          return "(";
+        case "]":
+          return "[";
+        case ">":
+          return "<";
+      }
+    };
+    for (let line of this.code.split("\n")) {
+      line = line.trim();
+      if (line.length <= 0) {
+        // Don't indent empty lines.
+        result += "\n";
+        continue;
+      }
+
+      const firstChar = line[0];
+      switch (firstChar) {
+        case "}":
+        case ")":
+        case "]":
+        case ">": {
+          const left = getMatchingLeftBracket(firstChar);
+          while (contextStack.pop() !== left) {
+            if (contextStack.length <= 0) {
+              throw Error();
+            }
+          }
+          break;
+        }
+        case ".": {
+          if (peakTop() !== ".") {
+            contextStack.push(".");
+          }
+          break;
+        }
+      }
+      const indent =
+        indentUnit.repeat(contextStack.length) +
+        (line.startsWith("*") ? " " : "");
+      result += `${indent}${line.trimEnd()}\n`;
+      if (line.startsWith("//") || line.startsWith("*")) {
+        // A comment.
+        continue;
+      }
+      const lastChar = line.slice(-1);
+      switch (lastChar) {
+        case "{":
+        case "(":
+        case "[":
+        case "<": {
+          // The next line will be indented
+          contextStack.push(lastChar);
+          break;
+        }
+        case ":":
+        case "=": {
+          if (peakTop() !== ":") {
+            contextStack.push(":");
+          }
+          break;
+        }
+        case ";":
+        case ",": {
+          if (peakTop() === "." || peakTop() === ":") {
+            contextStack.pop();
+          }
+        }
+      }
     }
+
+    return (
+      result
+        // Remove spaces enclosed within curly brackets if that's all there is.
+        .replace(/\{\s+\}/g, "{}")
+        // Remove spaces enclosed within round brackets if that's all there is.
+        .replace(/\(\s+\)/g, "()")
+        // Remove spaces enclosed within square brackets if that's all there is.
+        .replace(/\[\s+\]/g, "[]")
+        // Remove empty line following an open curly bracket.
+        .replace(/(\{\n *)/g, "$1")
+        // Remove empty line preceding a closed curly bracket.
+        .replace(/\n(\n *\})/g, "$1")
+        // Coalesce consecutive empty lines.
+        .replace(/\n\n\n+/g, "\n\n")
+        // Remove trailing newline.
+        .replace(/\n\n$/g, "\n")
+    );
   }
 }
 
