@@ -51,6 +51,19 @@ enum Kind {
   create_option: WrapOption;
 }
 
+enum NestedTypeNameConflicts {
+  struct Unknown {}
+  unknown: Unknown;
+
+  struct Kind {}
+  kind: Kind;
+}
+
+enum VariantTypeNameConflicts {
+  struct Monday {}
+  monday: Monday;
+}
+
 enum Status {
   OK;
 

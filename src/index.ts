@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { KeyedArrayContext, type KeySpec } from "./keyed_array_context.js";
 import {
+  getDeclaredTypeName,
   modulePathToImportAlias,
   modulePathToOutputPath,
   toFieldGetterName,
@@ -152,7 +153,7 @@ class ZigSourceFileGenerator {
   }
 
   private writeStruct(loc: RecordLocation): void {
-    const typeName = toTypeName(loc.record.name.text);
+    const typeName = getDeclaredTypeName(loc);
     const children = this.childrenOf.get(loc.record) ?? [];
     const keySpecs = this.keyedArrayContext.getKeySpecsForItemStruct(
       loc,
@@ -212,9 +213,8 @@ class ZigSourceFileGenerator {
   }
 
   private writeEnum(loc: RecordLocation): void {
-    const typeName = toTypeName(loc.record.name.text);
+    const typeName = getDeclaredTypeName(loc);
     const children = this.childrenOf.get(loc.record) ?? [];
-    const variantNamesNeedSuffix = doVariantNamesNeedSuffix(loc.record.fields);
     const emitKindEnum = this.keyedArrayContext.isEnumUsedAsKey(loc.record);
 
     this.push(commentify(docToCommentText(loc.record.doc)));
@@ -228,9 +228,7 @@ class ZigSourceFileGenerator {
       this.push(`pub const Kind = enum {\n`);
       this.push(`${GENERATED_UNKNOWN_VARIANT_NAME},\n`);
       for (const variant of loc.record.fields) {
-        this.push(
-          `${getRenderedVariantName(variant, variantNamesNeedSuffix)},\n`,
-        );
+        this.push(`${toVariantName(variant.name.text)},\n`);
       }
       this.push(`};\n`);
     }
@@ -245,10 +243,7 @@ class ZigSourceFileGenerator {
         `.${GENERATED_UNKNOWN_VARIANT_NAME} => .${GENERATED_UNKNOWN_VARIANT_NAME},\n`,
       );
       for (const variant of loc.record.fields) {
-        const variantName = getRenderedVariantName(
-          variant,
-          variantNamesNeedSuffix,
-        );
+        const variantName = toVariantName(variant.name.text);
         this.push(`.${variantName} => .${variantName},\n`);
       }
       this.push(`};\n`);
@@ -265,13 +260,9 @@ class ZigSourceFileGenerator {
           variant.isRecursive !== false
             ? `*const ${this.typeSpeller.getZigType(variant.type)}`
             : this.typeSpeller.getZigType(variant.type);
-        this.push(
-          `${getRenderedVariantName(variant, variantNamesNeedSuffix)}: ${variantType},\n`,
-        );
+        this.push(`${toVariantName(variant.name.text)}: ${variantType},\n`);
       } else {
-        this.push(
-          `${getRenderedVariantName(variant, variantNamesNeedSuffix)},\n`,
-        );
+        this.push(`${toVariantName(variant.name.text)},\n`);
       }
     }
     this.push(`};\n`);
@@ -383,7 +374,8 @@ class ZigSourceFileGenerator {
     // where N is the length of this array.
     const contextStack: Array<"{" | "(" | "[" | "<" | ":" | "."> = [];
     // Returns the last element in `contextStack`.
-    const peakTop = (): string => contextStack.at(-1)!;
+    const peakTop = (): string | undefined =>
+      contextStack[contextStack.length - 1];
     const getMatchingLeftBracket = (r: "}" | ")" | "]" | ">"): string => {
       switch (r) {
         case "}":
@@ -477,26 +469,6 @@ class ZigSourceFileGenerator {
         .replace(/\n\n$/g, "\n")
     );
   }
-}
-
-function doVariantNamesNeedSuffix(variants: readonly Field[]): boolean {
-  const seenNames = new Set<string>();
-  for (const variant of variants) {
-    const name = toVariantName(variant.name.text);
-    if (name === GENERATED_UNKNOWN_VARIANT_NAME || seenNames.has(name)) {
-      return true;
-    }
-    seenNames.add(name);
-  }
-  return false;
-}
-
-function getRenderedVariantName(field: Field, suffixNeeded: boolean): string {
-  const baseName = toVariantName(field.name.text);
-  if (!suffixNeeded) {
-    return baseName;
-  }
-  return `${baseName}${field.type ? "Wrapper" : "Const"}`;
 }
 
 function relativePathFromModule(

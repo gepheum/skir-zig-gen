@@ -9,9 +9,10 @@ import {
   type ResolvedType,
 } from "skir-internal";
 import {
+  getDeclaredTypeName,
+  getTypeName,
   modulePathToImportAlias,
   toStructFieldName,
-  toTypeName,
 } from "./naming.js";
 import type { TypeSpeller } from "./type_speller.js";
 
@@ -73,11 +74,12 @@ export class KeyedArrayContext {
       return [];
     }
 
-    const localTypeName = toTypeName(struct.record.name.text);
-    const parentPath = struct.recordAncestors
-      .slice(0, -1)
-      .map((record) => toTypeName(record.name.text))
-      .join(".");
+    const localTypeName = getDeclaredTypeName(struct);
+    const fullTypeName = getTypeName(struct);
+    const parentPath =
+      fullTypeName === localTypeName
+        ? ""
+        : fullTypeName.slice(0, -(localTypeName.length + 1));
     const importPrefix =
       struct.modulePath === typeSpeller.modulePath
         ? ""
