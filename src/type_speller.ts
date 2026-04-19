@@ -7,6 +7,7 @@ import type {
   ResolvedRecordRef,
   ResolvedType,
 } from "skir-internal";
+import { KeyedArrayContext } from "./keyed_array_context.js";
 import {
   getTypeName,
   modulePathToImportAlias,
@@ -18,6 +19,7 @@ export class TypeSpeller {
   constructor(
     readonly recordMap: ReadonlyMap<RecordKey, RecordLocation>,
     readonly modulePath: string,
+    readonly keyedArrayContext: KeyedArrayContext,
   ) {}
 
   getZigType(
@@ -34,11 +36,13 @@ export class TypeSpeller {
         return `${modulePathToImportAlias(recordLocation.modulePath)}.${typeName}`;
       }
       case "array": {
-        if (type.key) {
-          if (!options.keyedSpecName) {
-            throw new Error("Missing keyedSpecName for keyed array type");
-          }
-          return `skir_client.KeyedArray(${options.keyedSpecName})`;
+        const keyedSpecName =
+          options.keyedSpecName ??
+          (type.key
+            ? this.keyedArrayContext.getKeySpecForArrayType(type, this)?.specRef
+            : undefined);
+        if (keyedSpecName) {
+          return `skir_client.KeyedArray(${keyedSpecName})`;
         }
         return `[]const ${this.getZigType(type.item)}`;
       }
@@ -56,14 +60,17 @@ export class TypeSpeller {
     switch (type.kind) {
       case "record":
         return `${this.getZigType(type)}.DEFAULT`;
-      case "array":
-        if (type.key) {
-          if (!options.keyedSpecName) {
-            throw new Error("Missing keyedSpecName for keyed array default");
-          }
-          return `skir_client.KeyedArray(${options.keyedSpecName}).empty()`;
+      case "array": {
+        const keyedSpecName =
+          options.keyedSpecName ??
+          (type.key
+            ? this.keyedArrayContext.getKeySpecForArrayType(type, this)?.specRef
+            : undefined);
+        if (keyedSpecName) {
+          return `skir_client.KeyedArray(${keyedSpecName}).empty()`;
         }
         return "&.{}";
+      }
       case "optional":
         return "null";
       case "primitive":
@@ -76,6 +83,15 @@ export class TypeSpeller {
       return primitiveToZigType(keyType.primitive);
     }
     return `${this.getZigType(keyType)}.Kind`;
+  }
+
+  getTypeName(recordKey: RecordKey): string {
+    const recordLocation = this.recordMap.get(recordKey)!;
+    const typeName = getTypeName(recordLocation);
+    if (recordLocation.modulePath === this.modulePath) {
+      return typeName;
+    }
+    return `${modulePathToImportAlias(recordLocation.modulePath)}.${typeName}`;
   }
 
   getKeyAccessor(baseExpr: string, fieldPath: FieldPath): string {
