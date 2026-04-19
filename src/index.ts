@@ -1,8 +1,5 @@
 // TODO: formatting, better end of lines, use the format thing to not worry about indent.
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
-// TODO: no import node:path
-
-import { posix as pathPosix } from "node:path";
 import {
   type CodeGenerator,
   type Field,
@@ -506,16 +503,20 @@ function relativePathFromModule(
   fromModulePath: string,
   toModulePath: string | null,
 ): string {
-  const fromFile = pathPosix.join(
-    "src",
-    "skirout",
-    modulePathToOutputPath(fromModulePath),
-  );
+  const fromFile = `src/skirout/${modulePathToOutputPath(fromModulePath)}`;
   const toFile = toModulePath
-    ? pathPosix.join("src", "skirout", modulePathToOutputPath(toModulePath))
-    : pathPosix.join("src", "skir_client.zig");
-  const relative = pathPosix.relative(pathPosix.dirname(fromFile), toFile);
-  return relative.length > 0 ? relative : ".";
+    ? `src/skirout/${modulePathToOutputPath(toModulePath)}`
+    : "src/skir_client.zig";
+  const fromDir = fromFile.slice(0, fromFile.lastIndexOf("/"));
+  const fromParts = fromDir.split("/");
+  const toParts = toFile.split("/");
+  let common = 0;
+  while (common < fromParts.length && fromParts[common] === toParts[common]) {
+    common++;
+  }
+  const up = fromParts.length - common;
+  const rel = [...Array(up).fill(".."), ...toParts.slice(common)].join("/");
+  return rel.length > 0 ? rel : ".";
 }
 
 function commentify(text: string, indent = ""): string {
