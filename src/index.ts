@@ -189,10 +189,20 @@ class ZigSourceFileGenerator {
     this.push(
       `${indent}    _unrecognized: ?skir_client.UnrecognizedFields = null,\n\n`,
     );
-    this.push(`${indent}    pub const DEFAULT: @This() = .{};\n\n`);
-    this.push(`${indent}    pub fn defaultRef() *const @This() {\n`);
-    this.push(`${indent}        return &@This().DEFAULT;\n`);
-    this.push(`${indent}    }\n`);
+    this.push(`${indent}    pub const DEFAULT: @This() = .{\n`);
+    for (const field of loc.record.fields) {
+      if (field.isRecursive !== false) {
+        this.push(
+          `${indent}        .${this.getRecursiveStorageName(field)} = .default_value,\n`,
+        );
+      } else {
+        this.push(
+          `${indent}        .${toStructFieldName(field.name.text)} = ${this.typeSpeller.getDefaultExpr(field.type!)},\n`,
+        );
+      }
+    }
+    this.push(`${indent}        ._unrecognized = null,\n`);
+    this.push(`${indent}    };\n\n`);
 
     const recursiveFields = loc.record.fields.filter(
       (field) => field.isRecursive !== false,
@@ -245,9 +255,6 @@ class ZigSourceFileGenerator {
     this.push(
       `${indent}    pub const DEFAULT: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n\n`,
     );
-    this.push(`${indent}    pub fn defaultRef() *const @This() {\n`);
-    this.push(`${indent}        return &@This().DEFAULT;\n`);
-    this.push(`${indent}    }\n\n`);
     if (emitKindEnum) {
       this.push(`${indent}    pub fn kind(self: @This()) Kind {\n`);
       this.push(`${indent}        return switch (self) {\n`);
@@ -294,16 +301,15 @@ class ZigSourceFileGenerator {
       const storageName = this.getRecursiveStorageName(field);
       this.push(comment);
       this.push(
-        `${indent}${storageName}: ${this.getRecursiveTypeName(field)} = .default_value,\n\n`,
+        `${indent}${storageName}: ${this.getRecursiveTypeName(field)},\n\n`,
       );
       return;
     }
 
     const fieldName = toStructFieldName(field.name.text);
     const fieldType = this.typeSpeller.getZigType(field.type!);
-    const defaultExpr = this.typeSpeller.getDefaultExpr(field.type!);
     this.push(comment);
-    this.push(`${indent}${fieldName}: ${fieldType} = ${defaultExpr},\n\n`);
+    this.push(`${indent}${fieldName}: ${fieldType},\n\n`);
   }
 
   private writeRecursiveFieldGetter(field: Field, indent: string): void {
@@ -341,7 +347,7 @@ class ZigSourceFileGenerator {
     this.push(`${indent}        return ${keySpec.zigKeyExpr};\n`);
     this.push(`${indent}    }\n\n`);
     this.push(`${indent}    pub fn defaultValue() *Value {\n`);
-    this.push(`${indent}        return @constCast(Value.defaultRef());\n`);
+    this.push(`${indent}        return @constCast(&Value.DEFAULT);\n`);
     this.push(`${indent}    }\n\n`);
     this.push(`${indent}    pub fn keyExtractor() []const u8 {\n`);
     this.push(
