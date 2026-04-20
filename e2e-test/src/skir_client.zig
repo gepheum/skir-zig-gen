@@ -1,11 +1,13 @@
 const s = @import("serializers.zig");
 const core = @import("serializer.zig");
+const timestamp = @import("timestamp.zig");
+const unrecognized = @import("unrecognized.zig");
 const struct_adapter = @import("struct_adapter.zig");
 const enum_adapter = @import("enum_adapter.zig");
 
-pub const UnrecognizedFields = s.UnrecognizedFields;
-pub const UnrecognizedVariant = s.UnrecognizedVariant;
-pub const Timestamp = s.Timestamp;
+pub const UnrecognizedFields = unrecognized.UnrecognizedFields;
+pub const UnrecognizedVariant = unrecognized.UnrecognizedVariant;
+pub const Timestamp = timestamp.Timestamp;
 pub const SerializeFormat = core.SerializeFormat;
 pub const Serializer = core.Serializer;
 pub const BoolAdapter = s.BoolAdapter;
