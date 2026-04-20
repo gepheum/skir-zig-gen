@@ -58,6 +58,11 @@ export function toVariantName(input: string): string {
   return RESERVED_TYPE_NAMES.has(name) ? `${name}_` : name;
 }
 
+export function toConstantName(input: string): string {
+  const name = `${convertCase(input, "lower_underscore")}_const`;
+  return RESERVED_LOWER_NAMES.has(name) ? `${name}_value` : name;
+}
+
 function getDeclaredTypeNameSegment(
   input: string,
   parentRecord: RecordLocation["record"] | null,

@@ -3,13 +3,16 @@
 // TODO: deduplicate serializer... defined both in serializers and serializer
 // TODO: do not expose the adapter, only expose the serializer?
 import {
+  unquoteAndUnescape,
   type CodeGenerator,
+  type Constant,
   type Field,
   type Module,
   type Record,
   type RecordKey,
   type RecordLocation,
   type ResolvedType,
+  type Value,
 } from "skir-internal";
 import { z } from "zod";
 import { KeyedArrayContext, type KeySpec } from "./keyed_array_context.js";
@@ -17,6 +20,7 @@ import {
   getDeclaredTypeName,
   modulePathToImportAlias,
   modulePathToOutputPath,
+  toConstantName,
   toFieldGetterName,
   toStructFieldName,
   toVariantName,
@@ -95,6 +99,11 @@ class ZigSourceFileGenerator {
     for (const loc of inModule.records) {
       this.collectRecordImports(loc.record);
     }
+    for (const constant of inModule.constants) {
+      if (constant.type) {
+        this.collectTypeImports(constant.type);
+      }
+    }
   }
 
   generate(): string {
@@ -117,6 +126,13 @@ class ZigSourceFileGenerator {
 
     for (const loc of this.childrenOf.get(null) ?? []) {
       this.writeRecord(loc);
+    }
+
+    if (this.inModule.constants.length > 0) {
+      this.push("\n");
+      for (const constant of this.inModule.constants) {
+        this.writeConstant(constant);
+      }
     }
 
     return this.joinLinesAndFixFormatting();
@@ -599,6 +615,276 @@ class ZigSourceFileGenerator {
     this.push(`return ${toZigStringLiteral(keySpec.keyExtractor)};\n`);
     this.push(`}\n`);
     this.push(`};\n`);
+  }
+
+  private writeConstant(constant: Constant): void {
+    if (!constant.type) {
+      return;
+    }
+
+    if (!this.typeContainsKeyedArray(constant.type)) {
+      this.writeConstValueConstant(constant, constant.type);
+      return;
+    }
+
+    this.writeLazyConstant(constant, constant.type);
+  }
+
+  private writeConstValueConstant(
+    constant: Constant,
+    type: ResolvedType,
+  ): void {
+    const zigName = toConstantName(constant.name.text);
+    const zigType = this.typeSpeller.getZigType(type);
+    const constExpr = this.valueToZigExpr(constant.value, type);
+
+    this.push(commentify(docToCommentText(constant.doc)));
+    this.push(`pub const ${zigName}: ${zigType} = ${constExpr};\n\n`);
+  }
+
+  private writeLazyConstant(constant: Constant, type: ResolvedType): void {
+    if (constant.valueAsDenseJson === undefined) {
+      return;
+    }
+
+    const zigName = toConstantName(constant.name.text);
+    const zigType = this.typeSpeller.getZigType(type);
+    const serializerExpr = this.getSerializerExpr(type);
+    const denseJson = JSON.stringify(constant.valueAsDenseJson);
+
+    this.push(commentify(docToCommentText(constant.doc)));
+    this.push(`pub fn ${zigName}() *const ${zigType} {\n`);
+    this.push(`const Holder = struct {\n`);
+    this.push(`var mutex: std.Thread.Mutex = .{};\n`);
+    this.push(`var initialized: bool = false;\n`);
+    this.push(`var value: ${zigType} = undefined;\n`);
+    this.push(`};\n`);
+    this.push(`Holder.mutex.lock();\n`);
+    this.push(`defer Holder.mutex.unlock();\n`);
+    this.push(`if (!Holder.initialized) {\n`);
+    this.push(`Holder.value = ${serializerExpr}.deserialize(\n`);
+    this.push(`std.heap.page_allocator,\n`);
+    this.push(`${toZigStringLiteral(denseJson)},\n`);
+    this.push(`.{ .keepUnrecognizedValues = false },\n`);
+    this.push(`) catch unreachable;\n`);
+    this.push(`Holder.initialized = true;\n`);
+    this.push(`}\n`);
+    this.push(`return &Holder.value;\n`);
+    this.push(`}\n\n`);
+  }
+
+  private typeContainsKeyedArray(
+    type: ResolvedType,
+    seenRecords: Set<RecordKey> = new Set(),
+  ): boolean {
+    switch (type.kind) {
+      case "primitive":
+        return false;
+      case "optional":
+        return this.typeContainsKeyedArray(type.other, seenRecords);
+      case "array":
+        return (
+          !!type.key || this.typeContainsKeyedArray(type.item, seenRecords)
+        );
+      case "record": {
+        if (seenRecords.has(type.key)) {
+          return false;
+        }
+        seenRecords.add(type.key);
+        const recordLocation = this.typeSpeller.recordMap.get(type.key)!;
+        for (const field of recordLocation.record.fields) {
+          if (
+            field.type &&
+            this.typeContainsKeyedArray(field.type, seenRecords)
+          ) {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+  }
+
+  private valueToZigExpr(value: Value, type: ResolvedType): string {
+    switch (type.kind) {
+      case "primitive":
+        return this.primitiveToZigExpr(value, type.primitive);
+      case "optional": {
+        if (value.kind === "literal" && value.token.text === "null") {
+          return "null";
+        }
+        return this.valueToZigExpr(value, type.other);
+      }
+      case "array": {
+        if (value.kind !== "array") {
+          throw new Error("Expected array value for array constant");
+        }
+        if (value.items.length === 0) {
+          return "&.{}";
+        }
+        const items = value.items.map((item) =>
+          this.valueToZigExpr(item, type.item),
+        );
+        return `&.{\n${items.join(",\n")}\n}`;
+      }
+      case "record": {
+        const recordLocation = this.typeSpeller.recordMap.get(type.key)!;
+        if (recordLocation.record.recordType === "struct") {
+          return this.structValueToZigExpr(value, recordLocation);
+        }
+        return this.enumValueToZigExpr(value, recordLocation);
+      }
+    }
+  }
+
+  private primitiveToZigExpr(
+    value: Value,
+    primitive:
+      | "bool"
+      | "int32"
+      | "int64"
+      | "hash64"
+      | "float32"
+      | "float64"
+      | "timestamp"
+      | "string"
+      | "bytes",
+  ): string {
+    if (value.kind !== "literal") {
+      throw new Error(`Expected literal for primitive ${primitive}`);
+    }
+    const tokenText = value.token.text;
+
+    switch (primitive) {
+      case "bool":
+      case "int32":
+      case "int64":
+      case "hash64":
+        return tokenText;
+      case "float32":
+        return this.floatTokenToZigExpr(tokenText, "f32");
+      case "float64":
+        return this.floatTokenToZigExpr(tokenText, "f64");
+      case "timestamp": {
+        const ms = new Date(unquoteAndUnescape(tokenText)).getTime();
+        if (Number.isNaN(ms)) {
+          throw new Error(`Cannot parse timestamp constant: ${tokenText}`);
+        }
+        return `.{ .unix_millis = ${Math.trunc(ms)} }`;
+      }
+      case "string":
+        return toZigStringLiteral(unquoteAndUnescape(tokenText));
+      case "bytes": {
+        const raw = unquoteAndUnescape(tokenText);
+        const hex = raw.startsWith("hex:") ? raw.slice(4) : raw;
+        if (hex.length === 0) {
+          return '""';
+        }
+        const bytes: string[] = [];
+        for (let i = 0; i < hex.length; i += 2) {
+          const pair = hex.slice(i, i + 2);
+          bytes.push(`0x${pair.toLowerCase()}`);
+        }
+        return `&.{ ${bytes.join(", ")} }`;
+      }
+    }
+  }
+
+  private floatTokenToZigExpr(
+    tokenText: string,
+    typeName: "f32" | "f64",
+  ): string {
+    if (!tokenText.startsWith('"') && !tokenText.startsWith("'")) {
+      return tokenText;
+    }
+    const special = unquoteAndUnescape(tokenText);
+    switch (special) {
+      case "Infinity":
+        return `std.math.inf(${typeName})`;
+      case "-Infinity":
+        return `-std.math.inf(${typeName})`;
+      case "NaN":
+        return `std.math.nan(${typeName})`;
+      default:
+        return tokenText;
+    }
+  }
+
+  private structValueToZigExpr(value: Value, record: RecordLocation): string {
+    if (value.kind !== "object") {
+      throw new Error("Expected object for struct constant");
+    }
+
+    const entries: string[] = [];
+    for (const field of record.record.fields) {
+      if (!field.type) continue;
+      const fieldEntry = value.entries[field.name.text];
+      if (field.isRecursive !== false) {
+        const storageName = this.getRecursiveStorageName(field);
+        if (fieldEntry) {
+          const innerType = this.typeSpeller.getZigType(field.type);
+          const innerExpr = this.valueToZigExpr(fieldEntry.value, field.type);
+          entries.push(
+            `.${storageName} = .{ .value = &@as(${innerType}, ${innerExpr}) }`,
+          );
+        } else {
+          entries.push(`.${storageName} = .default_value`);
+        }
+      } else {
+        const fieldName = toStructFieldName(field.name.text);
+        const fieldExpr = fieldEntry
+          ? this.valueToZigExpr(fieldEntry.value, field.type)
+          : this.typeSpeller.getDefaultExpr(field.type);
+        entries.push(`.${fieldName} = ${fieldExpr}`);
+      }
+    }
+    entries.push(`._unrecognized = null`);
+
+    return `.{\n${entries.join(",\n")}\n}`;
+  }
+
+  private enumValueToZigExpr(value: Value, record: RecordLocation): string {
+    if (value.kind === "literal") {
+      const variantName = unquoteAndUnescape(value.token.text);
+      const declaration = record.record.nameToDeclaration[variantName];
+      if (!declaration || declaration.kind !== "field") {
+        return `.{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} }`;
+      }
+      const zigVariant = toVariantName(declaration.name.text);
+      if (declaration.type) {
+        return `.{ .${zigVariant} = ${this.typeSpeller.getDefaultExpr(declaration.type)} }`;
+      }
+      return `.${zigVariant}`;
+    }
+
+    if (value.kind !== "object") {
+      throw new Error("Expected object for enum wrapper constant");
+    }
+
+    const kindEntry = value.entries["kind"];
+    if (!kindEntry || kindEntry.value.kind !== "literal") {
+      throw new Error("Expected enum object to have literal kind");
+    }
+    const variantName = unquoteAndUnescape(kindEntry.value.token.text);
+    const declaration = record.record.nameToDeclaration[variantName];
+    if (!declaration || declaration.kind !== "field") {
+      return `.{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} }`;
+    }
+
+    const zigVariant = toVariantName(declaration.name.text);
+    if (!declaration.type) {
+      return `.${zigVariant}`;
+    }
+
+    const payloadEntry = value.entries["value"];
+    const payloadExpr = payloadEntry
+      ? this.valueToZigExpr(payloadEntry.value, declaration.type)
+      : this.typeSpeller.getDefaultExpr(declaration.type);
+    if (declaration.isRecursive !== false) {
+      const rawType = this.typeSpeller.getZigType(declaration.type);
+      return `.{ .${zigVariant} = &@as(${rawType}, ${payloadExpr}) }`;
+    }
+    return `.{ .${zigVariant} = ${payloadExpr} }`;
   }
 
   private getRecursiveStorageName(field: Field): string {

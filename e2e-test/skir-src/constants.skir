@@ -1,4 +1,5 @@
 import { JsonValue } from "enums.skir";
+import { Triangle } from "shapes.skir";
 
 /// One
 /// constant
@@ -47,3 +48,31 @@ const LARGE_INT64: int64 = 9223372036854775807;
 const B: bool = false;
 
 const PI: float64 = 3.141592653589793;
+
+const ONE_TRIANGLE: Triangle = {
+  corners: [
+    {
+      point: {
+        x: 0,
+        y: 0,
+      },
+    },
+    {
+      point: {
+        x: 10,
+        y: 0,
+      },
+    },
+    {
+      point: {
+        x: 0,
+        y: 10,
+      },
+    },
+  ],
+  color: {
+    r: 255,
+    g: 0,
+    b: 128,
+  },
+};
