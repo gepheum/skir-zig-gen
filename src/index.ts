@@ -1,4 +1,5 @@
 // TODO: formatting, better end of lines, use the format thing to not worry about indent.
+// TODO: make unrecognized_fields generic
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
 // TODO: deduplicate serializer... defined both in serializers and serializer
 // TODO: do not expose the adapter, only expose the serializer?
