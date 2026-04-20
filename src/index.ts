@@ -152,6 +152,11 @@ class ZigSourceFileGenerator {
     } else {
       this.push("\n");
     }
+
+    this.push(
+      `const _SerializerInitState = enum { uninitialized, initializing, initialized };\n`,
+    );
+    this.push(`var _serializer_init_mutex: std.Thread.Mutex = .{};\n\n`);
   }
 
   private writeStruct(loc: RecordLocation): void {
@@ -307,13 +312,16 @@ class ZigSourceFileGenerator {
     this.push(`fn _adapter() *skir_client.StructAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
     this.push(`const Holder = struct {\n`);
-    this.push(`var mutex: std.Thread.Mutex = .{};\n`);
-    this.push(`var initialized: bool = false;\n`);
+    this.push(`var state: _SerializerInitState = .uninitialized;\n`);
     this.push(`var adapter: skir_client.StructAdapter(S) = undefined;\n`);
     this.push(`};\n`);
-    this.push(`Holder.mutex.lock();\n`);
-    this.push(`defer Holder.mutex.unlock();\n`);
-    this.push(`if (!Holder.initialized) {\n`);
+    this.push(`_serializer_init_mutex.lock();\n`);
+    this.push(`defer _serializer_init_mutex.unlock();\n`);
+    this.push(`switch (Holder.state) {\n`);
+    this.push(`.initialized, .initializing => return &Holder.adapter,\n`);
+    this.push(`.uninitialized => {},\n`);
+    this.push(`}\n`);
+    this.push(`Holder.state = .initializing;\n`);
     this.push(`Holder.adapter = skir_client.StructAdapter(S).init(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
@@ -339,7 +347,7 @@ class ZigSourceFileGenerator {
         const storageName = this.getRecursiveStorageName(field);
         const rawType = this.typeSpeller.getZigType(field.type!);
         const storageType = `skir_client.Recursive(${rawType})`;
-        const fieldSerializer = `skir_client.recursiveSerializer(${rawType}, ${this.getSerializerExpr(field.type!)})`;
+        const fieldSerializer = `skir_client.recursiveSerializer(${rawType}, ${this.getSerializerExpr(field.type!, { maybeInitializingSameModule: true })})`;
         this.push(`Holder.adapter.addField(\n`);
         this.push(`${storageType},\n`);
         this.push(`${toZigStringLiteral(field.name.text)},\n`);
@@ -360,7 +368,9 @@ class ZigSourceFileGenerator {
         this.push(`${fieldType},\n`);
         this.push(`${toZigStringLiteral(field.name.text)},\n`);
         this.push(`${field.number},\n`);
-        this.push(`${this.getSerializerExpr(field.type!)},\n`);
+        this.push(
+          `${this.getSerializerExpr(field.type!, { maybeInitializingSameModule: true })},\n`,
+        );
         this.push(`${doc},\n`);
         this.push(
           `struct { fn get(x: *const S) ${fieldType} { return x.${fieldName}; } }.get,\n`,
@@ -373,15 +383,21 @@ class ZigSourceFileGenerator {
     }
 
     this.push(`Holder.adapter.finalize() catch unreachable;\n`);
-    this.push(`Holder.initialized = true;\n`);
-    this.push(`}\n`);
+    this.push(`Holder.state = .initialized;\n`);
     this.push(`return &Holder.adapter;\n`);
     this.push(`}\n`);
 
-    this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(
+      `fn _maybeInitializingSerializer() skir_client.Serializer(@This()) {\n`,
+    );
     this.push(
       `return skir_client.structSerializerFromStatic(@This(), @This()._adapter);\n`,
     );
+    this.push(`}\n`);
+
+    this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(`_ = @This()._adapter();\n`);
+    this.push(`return @This()._maybeInitializingSerializer();\n`);
     this.push(`}\n`);
   }
 
@@ -391,13 +407,16 @@ class ZigSourceFileGenerator {
     this.push(`fn _adapter() *skir_client.EnumAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
     this.push(`const Holder = struct {\n`);
-    this.push(`var mutex: std.Thread.Mutex = .{};\n`);
-    this.push(`var initialized: bool = false;\n`);
+    this.push(`var state: _SerializerInitState = .uninitialized;\n`);
     this.push(`var adapter: skir_client.EnumAdapter(S) = undefined;\n`);
     this.push(`};\n`);
-    this.push(`Holder.mutex.lock();\n`);
-    this.push(`defer Holder.mutex.unlock();\n`);
-    this.push(`if (!Holder.initialized) {\n`);
+    this.push(`_serializer_init_mutex.lock();\n`);
+    this.push(`defer _serializer_init_mutex.unlock();\n`);
+    this.push(`switch (Holder.state) {\n`);
+    this.push(`.initialized, .initializing => return &Holder.adapter,\n`);
+    this.push(`.uninitialized => {},\n`);
+    this.push(`}\n`);
+    this.push(`Holder.state = .initializing;\n`);
     this.push(`Holder.adapter = skir_client.EnumAdapter(S).init(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
@@ -446,8 +465,10 @@ class ZigSourceFileGenerator {
           variant.isRecursive !== false ? `*const ${rawType}` : rawType;
         const serializerExpr =
           variant.isRecursive !== false
-            ? `skir_client.pointerSerializer(${rawType}, ${this.getSerializerExpr(variant.type)})`
-            : this.getSerializerExpr(variant.type);
+            ? `skir_client.pointerSerializer(${rawType}, ${this.getSerializerExpr(variant.type, { maybeInitializingSameModule: true })})`
+            : this.getSerializerExpr(variant.type, {
+                maybeInitializingSameModule: true,
+              });
         this.push(`Holder.adapter.addWrapperVariant(\n`);
         this.push(`${payloadType},\n`);
         this.push(`${toZigStringLiteral(variant.name.text)},\n`);
@@ -476,26 +497,35 @@ class ZigSourceFileGenerator {
     }
 
     this.push(`Holder.adapter.finalize() catch unreachable;\n`);
-    this.push(`Holder.initialized = true;\n`);
-    this.push(`}\n`);
+    this.push(`Holder.state = .initialized;\n`);
     this.push(`return &Holder.adapter;\n`);
     this.push(`}\n`);
 
-    this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(
+      `fn _maybeInitializingSerializer() skir_client.Serializer(@This()) {\n`,
+    );
     this.push(
       `return skir_client.enumSerializerFromStatic(@This(), @This()._adapter);\n`,
     );
     this.push(`}\n`);
+
+    this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(`_ = @This()._adapter();\n`);
+    this.push(`return @This()._maybeInitializingSerializer();\n`);
+    this.push(`}\n`);
   }
 
-  private getSerializerExpr(type: ResolvedType): string {
+  private getSerializerExpr(
+    type: ResolvedType,
+    options: { maybeInitializingSameModule?: boolean } = {},
+  ): string {
     switch (type.kind) {
       case "primitive":
         return this.getPrimitiveSerializerExpr(type.primitive);
       case "optional":
-        return `skir_client.optionalSerializer(${this.typeSpeller.getZigType(type.other)}, ${this.getSerializerExpr(type.other)})`;
+        return `skir_client.optionalSerializer(${this.typeSpeller.getZigType(type.other)}, ${this.getSerializerExpr(type.other, options)})`;
       case "array": {
-        const inner = this.getSerializerExpr(type.item);
+        const inner = this.getSerializerExpr(type.item, options);
         if (type.key) {
           const spec = this.keyedArrayContext.getKeySpecForArrayType(
             type,
@@ -507,8 +537,17 @@ class ZigSourceFileGenerator {
         }
         return `skir_client.arraySerializer(${this.typeSpeller.getZigType(type.item)}, ${inner})`;
       }
-      case "record":
-        return `${this.typeSpeller.getZigType(type)}.serializer()`;
+      case "record": {
+        const typeName = this.typeSpeller.getZigType(type);
+        const recordLocation = this.typeSpeller.recordMap.get(type.key)!;
+        if (
+          options.maybeInitializingSameModule &&
+          recordLocation.modulePath === this.inModule.path
+        ) {
+          return `${typeName}._maybeInitializingSerializer()`;
+        }
+        return `${typeName}.serializer()`;
+      }
     }
   }
 
