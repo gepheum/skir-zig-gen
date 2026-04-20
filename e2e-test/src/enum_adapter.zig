@@ -139,6 +139,8 @@ pub fn EnumAdapter(comptime T: type) type {
         ) !void {
             const Ctx = struct {
                 instance: T,
+                name: []const u8,
+                number: i32,
             };
             const Ops = struct {
                 fn freeCtx(alloc: std.mem.Allocator, ctx_ptr: *anyopaque) void {
@@ -156,13 +158,12 @@ pub fn EnumAdapter(comptime T: type) type {
                 }
 
                 fn toJson(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator, _: *const T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
-                    const _ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
-                    _ = _ctx;
+                    const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
                     if (eol_indent != null) {
-                        try writeJsonEscapedString(name, allocator, out);
+                        try writeJsonEscapedString(ctx.name, allocator, out);
                     } else {
                         var buf: [32]u8 = undefined;
-                        const n_str = std.fmt.bufPrint(&buf, "{d}", .{number}) catch unreachable;
+                        const n_str = std.fmt.bufPrint(&buf, "{d}", .{ctx.number}) catch unreachable;
                         try out.appendSlice(allocator, n_str);
                     }
                 }
@@ -171,8 +172,9 @@ pub fn EnumAdapter(comptime T: type) type {
                     return error.ExpectedConstantVariant;
                 }
 
-                fn encodeValue(_: *const anyopaque, allocator: std.mem.Allocator, _: *const T, out: *std.ArrayList(u8)) anyerror!void {
-                    try encodeUint32(@intCast(number), allocator, out);
+                fn encodeValue(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator, _: *const T, out: *std.ArrayList(u8)) anyerror!void {
+                    const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
+                    try encodeUint32(@intCast(ctx.number), allocator, out);
                 }
 
                 fn wrapDecode(_: *const anyopaque, _: std.mem.Allocator, _: *[]const u8, _: bool) anyerror!T {
@@ -190,7 +192,7 @@ pub fn EnumAdapter(comptime T: type) type {
             };
 
             const ctx = try self.allocator.create(Ctx);
-            ctx.* = .{ .instance = instance };
+            ctx.* = .{ .instance = instance, .name = name, .number = number };
 
             const entry = VariantEntry{
                 .name = try self.allocator.dupe(u8, name),
@@ -235,6 +237,8 @@ pub fn EnumAdapter(comptime T: type) type {
                 ser: s.Serializer(V),
                 wrap: *const fn (V) T,
                 get_value: *const fn (*const T) V,
+                name: []const u8,
+                number: i32,
             };
             const Ops = struct {
                 fn freeCtx(alloc: std.mem.Allocator, ctx_ptr: *anyopaque) void {
@@ -265,7 +269,7 @@ pub fn EnumAdapter(comptime T: type) type {
                         try out.append(allocator, '{');
                         try out.appendSlice(allocator, child);
                         try out.appendSlice(allocator, "\"kind\": ");
-                        try writeJsonEscapedString(name, allocator, out);
+                        try writeJsonEscapedString(ctx.name, allocator, out);
                         try out.append(allocator, ',');
                         try out.appendSlice(allocator, child);
                         try out.appendSlice(allocator, "\"value\": ");
@@ -275,7 +279,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     } else {
                         try out.append(allocator, '[');
                         var num_buf: [32]u8 = undefined;
-                        const n_str = std.fmt.bufPrint(&num_buf, "{d}", .{number}) catch unreachable;
+                        const n_str = std.fmt.bufPrint(&num_buf, "{d}", .{ctx.number}) catch unreachable;
                         try out.appendSlice(allocator, n_str);
                         try out.append(allocator, ',');
                         try ctx.ser._vtable.toJsonFn(allocator, v, null, out);
@@ -315,6 +319,8 @@ pub fn EnumAdapter(comptime T: type) type {
                 .ser = ser,
                 .wrap = wrap,
                 .get_value = get_value,
+                .name = name,
+                .number = number,
             };
 
             const entry = VariantEntry{

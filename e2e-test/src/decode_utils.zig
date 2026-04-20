@@ -63,6 +63,10 @@ pub fn skipValue(input: *[]const u8) anyerror!void {
     const wire = try readU8(input);
     switch (wire) {
         0...231 => {},
+        235 => {
+            if (input.*.len < 1) return error.UnexpectedEndOfInput;
+            input.* = input.*[1..];
+        },
         232, 236 => {
             if (input.*.len < 2) return error.UnexpectedEndOfInput;
             input.* = input.*[2..];

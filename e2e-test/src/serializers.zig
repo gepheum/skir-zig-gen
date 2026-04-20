@@ -401,7 +401,12 @@ pub const TimestampAdapter = struct {
     }
 
     pub fn decode(_: Self, _: std.mem.Allocator, input: *[]const u8, _: bool) anyerror!Timestamp {
-        const ms = try decodeNumber(input);
+        const wire = try readU8(input);
+        const ms: i64 = switch (wire) {
+            240 => @intFromFloat(@round(@as(f32, @bitCast(try readU32Le(input))))),
+            241 => @intFromFloat(@round(@as(f64, @bitCast(try readU64Le(input))))),
+            else => try decodeNumberBody(wire, input),
+        };
         return Timestamp{ .unix_millis = ms };
     }
 
