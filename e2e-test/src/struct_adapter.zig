@@ -251,9 +251,13 @@ pub fn StructAdapter(comptime T: type) type {
             const slot_count = self.getSlotCount(input);
             for (0..slot_count) |slot| {
                 if (slot > 0) try out.append(allocator, ',');
-                if (slot < self.slot_to_index.items.len and self.slot_to_index.items[slot]) |idx| {
-                    const e = self.ordered_entries.items[idx];
-                    try e.to_json_fn(e.ctx, allocator, input, null, out);
+                if (slot < self.slot_to_index.items.len) {
+                    if (self.slot_to_index.items[slot]) |idx| {
+                        const e = self.ordered_entries.items[idx];
+                        try e.to_json_fn(e.ctx, allocator, input, null, out);
+                    } else {
+                        try out.append(allocator, '0');
+                    }
                 } else {
                     try out.append(allocator, '0');
                 }
@@ -352,9 +356,13 @@ pub fn StructAdapter(comptime T: type) type {
             }
 
             for (0..slot_count) |slot| {
-                if (slot < self.slot_to_index.items.len and self.slot_to_index.items[slot]) |idx| {
-                    const e = self.ordered_entries.items[idx];
-                    try e.encode_fn(e.ctx, allocator, input, out);
+                if (slot < self.slot_to_index.items.len) {
+                    if (self.slot_to_index.items[slot]) |idx| {
+                        const e = self.ordered_entries.items[idx];
+                        try e.encode_fn(e.ctx, allocator, input, out);
+                    } else {
+                        try out.append(allocator, 0);
+                    }
                 } else {
                     try out.append(allocator, 0);
                 }

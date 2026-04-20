@@ -409,8 +409,10 @@ pub fn EnumAdapter(comptime T: type) type {
                 return self.unknownToJson(allocator, input, eol_indent, out);
             }
 
-            if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                return entry.to_json_fn(entry.ctx, allocator, input, eol_indent, out);
+            if (ko < self.kind_ordinal_to_entry.items.len) {
+                if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                    return entry.to_json_fn(entry.ctx, allocator, input, eol_indent, out);
+                }
             }
 
             if (eol_indent != null) {
@@ -437,11 +439,13 @@ pub fn EnumAdapter(comptime T: type) type {
                 .bool => |b| self.resolveConstantLookup(if (b) 1 else 0, keep_unrecognized),
                 .string => |str| blk: {
                     if (self.name_to_kind_ordinal.get(str)) |ko| {
-                        if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                            if (entry.is_constant_fn(entry.ctx)) {
-                                break :blk entry.constant_fn(entry.ctx);
+                        if (ko < self.kind_ordinal_to_entry.items.len) {
+                            if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                                if (entry.is_constant_fn(entry.ctx)) {
+                                    break :blk entry.constant_fn(entry.ctx);
+                                }
+                                if (entry.wrap_default_fn(entry.ctx)) |v| break :blk v;
                             }
-                            if (entry.wrap_default_fn(entry.ctx)) |v| break :blk v;
                         }
                     }
                     break :blk T.default;
@@ -463,11 +467,13 @@ pub fn EnumAdapter(comptime T: type) type {
                         else => break :blk T.default,
                     };
                     if (self.name_to_kind_ordinal.get(kind_name)) |ko| {
-                        if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                            if (entry.is_constant_fn(entry.ctx)) {
-                                break :blk entry.constant_fn(entry.ctx);
+                        if (ko < self.kind_ordinal_to_entry.items.len) {
+                            if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                                if (entry.is_constant_fn(entry.ctx)) {
+                                    break :blk entry.constant_fn(entry.ctx);
+                                }
+                                break :blk try entry.wrap_from_json_fn(entry.ctx, allocator, payload, keep_unrecognized);
                             }
-                            break :blk try entry.wrap_from_json_fn(entry.ctx, allocator, payload, keep_unrecognized);
                         }
                     }
                     break :blk T.default;
@@ -481,14 +487,18 @@ pub fn EnumAdapter(comptime T: type) type {
                 return switch (any) {
                     .removed => T.default,
                     .constant => |ko| blk: {
-                        if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                            break :blk entry.constant_fn(entry.ctx);
+                        if (ko < self.kind_ordinal_to_entry.items.len) {
+                            if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                                break :blk entry.constant_fn(entry.ctx);
+                            }
                         }
                         break :blk T.default;
                     },
                     .wrapper => |ko| blk: {
-                        if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                            break :blk try entry.wrap_from_json_fn(entry.ctx, allocator, payload, keep_unrecognized);
+                        if (ko < self.kind_ordinal_to_entry.items.len) {
+                            if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                                break :blk try entry.wrap_from_json_fn(entry.ctx, allocator, payload, keep_unrecognized);
+                            }
                         }
                         break :blk T.default;
                     },
@@ -506,14 +516,18 @@ pub fn EnumAdapter(comptime T: type) type {
                 return switch (any) {
                     .removed => T.default,
                     .constant => |ko| blk: {
-                        if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                            break :blk entry.constant_fn(entry.ctx);
+                        if (ko < self.kind_ordinal_to_entry.items.len) {
+                            if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                                break :blk entry.constant_fn(entry.ctx);
+                            }
                         }
                         break :blk T.default;
                     },
                     .wrapper => |ko| blk: {
-                        if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                            if (entry.wrap_default_fn(entry.ctx)) |v| break :blk v;
+                        if (ko < self.kind_ordinal_to_entry.items.len) {
+                            if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                                if (entry.wrap_default_fn(entry.ctx)) |v| break :blk v;
+                            }
                         }
                         break :blk T.default;
                     },
@@ -533,12 +547,13 @@ pub fn EnumAdapter(comptime T: type) type {
                 return;
             }
 
-            if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                if (entry.is_constant_fn(entry.ctx)) {
-                    return entry.encode_value_fn(entry.ctx, allocator, input, out);
-                }
+            if (ko < self.kind_ordinal_to_entry.items.len) {
+                if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                    if (entry.is_constant_fn(entry.ctx)) {
+                        return entry.encode_value_fn(entry.ctx, allocator, input, out);
+                    }
 
-                const n = entry.number;
+                    const n = entry.number;
                 if (n >= 1 and n <= 4) {
                     try out.append(allocator, @intCast(250 + n));
                 } else {
@@ -546,6 +561,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     try encodeUint32(@intCast(n), allocator, out);
                 }
                 return entry.encode_value_fn(entry.ctx, allocator, input, out);
+                }
             }
 
             try out.append(allocator, 0);
@@ -569,8 +585,10 @@ pub fn EnumAdapter(comptime T: type) type {
             if (self.number_to_entry.get(wrapper_number)) |any| {
                 return switch (any) {
                     .wrapper => |ko| blk: {
-                        if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                            break :blk try entry.wrap_decode_fn(entry.ctx, allocator, input, keep_unrecognized);
+                        if (ko < self.kind_ordinal_to_entry.items.len) {
+                            if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                                break :blk try entry.wrap_decode_fn(entry.ctx, allocator, input, keep_unrecognized);
+                            }
                         }
                         try skipValue(input);
                         break :blk T.default;
@@ -581,8 +599,10 @@ pub fn EnumAdapter(comptime T: type) type {
                     },
                     .constant => |ko| blk: {
                         try skipValue(input);
-                        if (ko < self.kind_ordinal_to_entry.items.len and self.kind_ordinal_to_entry.items[ko]) |entry| {
-                            break :blk entry.constant_fn(entry.ctx);
+                        if (ko < self.kind_ordinal_to_entry.items.len) {
+                            if (self.kind_ordinal_to_entry.items[ko]) |entry| {
+                                break :blk entry.constant_fn(entry.ctx);
+                            }
                         }
                         break :blk T.default;
                     },
