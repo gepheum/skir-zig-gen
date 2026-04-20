@@ -1,4 +1,6 @@
 const s = @import("serializers.zig");
+const struct_adapter = @import("struct_adapter.zig");
+const enum_adapter = @import("enum_adapter.zig");
 
 pub const UnrecognizedFields = s.UnrecognizedFields;
 pub const UnrecognizedVariant = s.UnrecognizedVariant;
@@ -36,3 +38,7 @@ pub const EnumDescriptor = s.EnumDescriptor;
 pub const TypeDescriptor = s.TypeDescriptor;
 pub const typeDescriptorToJson = s.typeDescriptorToJson;
 pub const typeDescriptorFromJson = s.typeDescriptorFromJson;
+pub const StructAdapter = struct_adapter.StructAdapter;
+pub const structSerializerFromStatic = struct_adapter.structSerializerFromStatic;
+pub const EnumAdapter = enum_adapter.EnumAdapter;
+pub const enumSerializerFromStatic = enum_adapter.enumSerializerFromStatic;

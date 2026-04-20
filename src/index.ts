@@ -1,5 +1,6 @@
 // TODO: formatting, better end of lines, use the format thing to not worry about indent.
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
+// TODO: deduplicate serializer... defined both in serializers and serializer
 import {
   type CodeGenerator,
   type Field,
