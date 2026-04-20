@@ -211,10 +211,12 @@ pub fn StructAdapter(comptime T: type) type {
 
             const fields = try self.allocator.alloc(s.StructField, self.ordered_entries.items.len);
             for (self.ordered_entries.items, 0..) |entry, idx| {
+                const ft = try self.allocator.create(s.TypeDescriptor);
+                ft.* = entry.field_type_fn(entry.ctx);
                 fields[idx] = .{
                     .name = entry.name,
                     .number = entry.number,
-                    .field_type = null,
+                    .field_type = ft,
                     .doc = entry.doc,
                 };
             }

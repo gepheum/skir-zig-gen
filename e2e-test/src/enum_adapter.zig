@@ -560,13 +560,13 @@ pub fn EnumAdapter(comptime T: type) type {
                     }
 
                     const n = entry.number;
-                if (n >= 1 and n <= 4) {
-                    try out.append(allocator, @intCast(250 + n));
-                } else {
-                    try out.append(allocator, 248);
-                    try encodeUint32(@intCast(n), allocator, out);
-                }
-                return entry.encode_value_fn(entry.ctx, allocator, input, out);
+                    if (n >= 1 and n <= 4) {
+                        try out.append(allocator, @intCast(250 + n));
+                    } else {
+                        try out.append(allocator, 248);
+                        try encodeUint32(@intCast(n), allocator, out);
+                    }
+                    return entry.encode_value_fn(entry.ctx, allocator, input, out);
                 }
             }
 

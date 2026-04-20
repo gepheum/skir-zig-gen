@@ -142,7 +142,12 @@ pub const Int32Adapter = struct {
     }
 
     pub fn decode(_: Self, _: std.mem.Allocator, input: *[]const u8, _: bool) anyerror!i32 {
-        return @truncate(try decodeNumber(input));
+        const wire = try readU8(input);
+        return switch (wire) {
+            240 => @intFromFloat(@round(@as(f32, @bitCast(try readU32Le(input))))),
+            241 => @intFromFloat(@round(@as(f64, @bitCast(try readU64Le(input))))),
+            else => @truncate(try decodeNumberBody(wire, input)),
+        };
     }
 
     pub fn typeDescriptor(_: Self) TypeDescriptor {
@@ -823,6 +828,13 @@ pub const BytesAdapter = struct {
 /// `Some(v)` delegates to `inner` for both JSON and binary encoding.
 pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(?T) {
     const ivt = inner._vtable;
+    // Declare S at function scope (not inside Adapter.typeDescriptor) so that each
+    // comptime instantiation of optionalSerializer gets its own unique S type and
+    // its own mutable statics, preventing cross-instantiation state sharing.
+    const S = struct {
+        var inner_td: TypeDescriptor = undefined;
+        var ready = false;
+    };
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: ?T) bool {
             return value == null;
@@ -854,11 +866,6 @@ pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Seria
             return try ivt.decodeFn(alloc, input, keep);
         }
         pub fn typeDescriptor(_: @This()) TypeDescriptor {
-            // Static storage for the inner descriptor so we can return a stable pointer.
-            const S = struct {
-                var inner_td: TypeDescriptor = undefined;
-                var ready = false;
-            };
             if (!S.ready) {
                 S.inner_td = ivt.typeDescriptorFn();
                 S.ready = true;
@@ -963,6 +970,10 @@ pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serial
 ///        4+ items → 0xFA + encodeUint32(count).
 pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializer([]const T) {
     const ivt = inner._vtable;
+    const S = struct {
+        var inner_td: TypeDescriptor = undefined;
+        var ready = false;
+    };
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: []const T) bool {
             return value.len == 0;
@@ -1027,10 +1038,6 @@ pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializ
             return items;
         }
         pub fn typeDescriptor(_: @This()) TypeDescriptor {
-            const S = struct {
-                var inner_td: TypeDescriptor = undefined;
-                var ready = false;
-            };
             if (!S.ready) {
                 S.inner_td = ivt.typeDescriptorFn();
                 S.ready = true;
@@ -1049,6 +1056,10 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
     const Value = Spec.Value;
     const KArr = KeyedArray(Spec);
     const ivt = inner._vtable;
+    const S = struct {
+        var inner_td: TypeDescriptor = undefined;
+        var ready = false;
+    };
     const key_extractor_name = comptime blk: {
         if (@hasDecl(Spec, "keyExtractor")) {
             const decl_ty = @TypeOf(Spec.keyExtractor);
@@ -1126,10 +1137,6 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
         }
 
         pub fn typeDescriptor(_: @This()) TypeDescriptor {
-            const S = struct {
-                var inner_td: TypeDescriptor = undefined;
-                var ready = false;
-            };
             if (!S.ready) {
                 S.inner_td = ivt.typeDescriptorFn();
                 S.ready = true;

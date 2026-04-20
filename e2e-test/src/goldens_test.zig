@@ -303,20 +303,7 @@ fn typedValueFromBytes(
 ) !goldens.TypedValue {
     return switch (tv.*) {
         .Bool => .{ .Bool = try skir_client.boolSerializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .Int32 => .{ .Int32 = blk: {
-            if (bytes.len >= 5 and std.mem.eql(u8, bytes[0..4], "skir")) {
-                const wire = bytes[4];
-                if (wire == 240 and bytes.len >= 9) {
-                    const bits = std.mem.readInt(u32, bytes[5..9], .little);
-                    break :blk @intFromFloat(@as(f32, @bitCast(bits)));
-                }
-                if (wire == 241 and bytes.len >= 13) {
-                    const bits = std.mem.readInt(u64, bytes[5..13], .little);
-                    break :blk @intFromFloat(@as(f64, @bitCast(bits)));
-                }
-            }
-            break :blk try skir_client.int32Serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized });
-        } },
+        .Int32 => .{ .Int32 = try skir_client.int32Serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Int64 => .{ .Int64 = try skir_client.int64Serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Hash64 => .{ .Hash64 = try skir_client.hash64Serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Float32 => .{ .Float32 = try skir_client.float32Serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
