@@ -131,6 +131,7 @@ class ZigSourceFileGenerator {
   }
 
   private writeImports(): void {
+    this.push(`const std = @import("std");\n`);
     this.push(
       `const skir_client = @import(${toZigStringLiteral(
         relativePathFromModule(this.inModule.path, null),
@@ -197,6 +198,8 @@ class ZigSourceFileGenerator {
       }
     }
 
+    this.writeStructSerializer(loc, typeName);
+
     this.push(`};\n`);
 
     if (keySpecs.length > 0) {
@@ -260,6 +263,9 @@ class ZigSourceFileGenerator {
         this.push(`${toVariantName(variant.name.text)},\n`);
       }
     }
+
+    this.writeEnumSerializer(loc, typeName);
+
     this.push(`};\n`);
   }
 
@@ -293,6 +299,251 @@ class ZigSourceFileGenerator {
     this.push(`.value => |value| value.*,\n`);
     this.push(`};\n`);
     this.push(`}\n`);
+  }
+
+  private writeStructSerializer(loc: RecordLocation, _typeName: string): void {
+    const qualifiedName = loc.recordAncestors.map((x) => x.name.text).join(".");
+
+    this.push(`fn _adapter() *skir_client.StructAdapter(@This()) {\n`);
+    this.push(`const S = @This();\n`);
+    this.push(`const Holder = struct {\n`);
+    this.push(`var mutex: std.Thread.Mutex = .{};\n`);
+    this.push(`var initialized: bool = false;\n`);
+    this.push(`var adapter: skir_client.StructAdapter(S) = undefined;\n`);
+    this.push(`};\n`);
+    this.push(`Holder.mutex.lock();\n`);
+    this.push(`defer Holder.mutex.unlock();\n`);
+    this.push(`if (!Holder.initialized) {\n`);
+    this.push(`Holder.adapter = skir_client.StructAdapter(S).init(\n`);
+    this.push(`std.heap.page_allocator,\n`);
+    this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
+    this.push(`${toZigStringLiteral(qualifiedName)},\n`);
+    this.push(`${toZigStringLiteral(docToCommentText(loc.record.doc))},\n`);
+    this.push(
+      `struct { fn get(x: *const S) ?skir_client.UnrecognizedFields { return x._unrecognized; } }.get,\n`,
+    );
+    this.push(
+      `struct { fn set(x: *S, u: ?skir_client.UnrecognizedFields) void { x._unrecognized = u; } }.set,\n`,
+    );
+    this.push(`) catch unreachable;\n`);
+
+    for (const removedNumber of loc.record.removedNumbers) {
+      this.push(
+        `Holder.adapter.addRemovedNumber(${removedNumber}) catch unreachable;\n`,
+      );
+    }
+
+    for (const field of loc.record.fields) {
+      const doc = toZigStringLiteral(docToCommentText(field.doc));
+      if (field.isRecursive !== false) {
+        const storageName = this.getRecursiveStorageName(field);
+        const rawType = this.typeSpeller.getZigType(field.type!);
+        const storageType = `skir_client.Recursive(${rawType})`;
+        const fieldSerializer = `skir_client.recursiveSerializer(${rawType}, ${this.getSerializerExpr(field.type!)})`;
+        this.push(`Holder.adapter.addField(\n`);
+        this.push(`${storageType},\n`);
+        this.push(`${toZigStringLiteral(field.name.text)},\n`);
+        this.push(`${field.number},\n`);
+        this.push(`${fieldSerializer},\n`);
+        this.push(`${doc},\n`);
+        this.push(
+          `struct { fn get(x: *const S) ${storageType} { return x.${storageName}; } }.get,\n`,
+        );
+        this.push(
+          `struct { fn set(x: *S, v: ${storageType}) void { x.${storageName} = v; } }.set,\n`,
+        );
+        this.push(`) catch unreachable;\n`);
+      } else {
+        const fieldName = toStructFieldName(field.name.text);
+        const fieldType = this.typeSpeller.getZigType(field.type!);
+        this.push(`Holder.adapter.addField(\n`);
+        this.push(`${fieldType},\n`);
+        this.push(`${toZigStringLiteral(field.name.text)},\n`);
+        this.push(`${field.number},\n`);
+        this.push(`${this.getSerializerExpr(field.type!)},\n`);
+        this.push(`${doc},\n`);
+        this.push(
+          `struct { fn get(x: *const S) ${fieldType} { return x.${fieldName}; } }.get,\n`,
+        );
+        this.push(
+          `struct { fn set(x: *S, v: ${fieldType}) void { x.${fieldName} = v; } }.set,\n`,
+        );
+        this.push(`) catch unreachable;\n`);
+      }
+    }
+
+    this.push(`Holder.adapter.finalize() catch unreachable;\n`);
+    this.push(`Holder.initialized = true;\n`);
+    this.push(`}\n`);
+    this.push(`return &Holder.adapter;\n`);
+    this.push(`}\n`);
+
+    this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(
+      `return skir_client.structSerializerFromStatic(@This(), @This()._adapter);\n`,
+    );
+    this.push(`}\n`);
+  }
+
+  private writeEnumSerializer(loc: RecordLocation, _typeName: string): void {
+    const qualifiedName = loc.recordAncestors.map((x) => x.name.text).join(".");
+
+    this.push(`fn _adapter() *skir_client.EnumAdapter(@This()) {\n`);
+    this.push(`const S = @This();\n`);
+    this.push(`const Holder = struct {\n`);
+    this.push(`var mutex: std.Thread.Mutex = .{};\n`);
+    this.push(`var initialized: bool = false;\n`);
+    this.push(`var adapter: skir_client.EnumAdapter(S) = undefined;\n`);
+    this.push(`};\n`);
+    this.push(`Holder.mutex.lock();\n`);
+    this.push(`defer Holder.mutex.unlock();\n`);
+    this.push(`if (!Holder.initialized) {\n`);
+    this.push(`Holder.adapter = skir_client.EnumAdapter(S).init(\n`);
+    this.push(`std.heap.page_allocator,\n`);
+    this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
+    this.push(`${toZigStringLiteral(qualifiedName)},\n`);
+    this.push(`${toZigStringLiteral(docToCommentText(loc.record.doc))},\n`);
+    this.push(`struct {\n`);
+    this.push(`fn getKindOrdinal(x: *const S) usize {\n`);
+    this.push(`return switch (x.*) {\n`);
+    this.push(`.${GENERATED_UNKNOWN_VARIANT_NAME} => 0,\n`);
+    let kindOrdinal = 1;
+    for (const variant of loc.record.fields) {
+      this.push(`.${toVariantName(variant.name.text)} => ${kindOrdinal},\n`);
+      kindOrdinal += 1;
+    }
+    this.push(`};\n`);
+    this.push(`}\n`);
+    this.push(`}.getKindOrdinal,\n`);
+    this.push(
+      `struct { fn wrapUnknown(u: skir_client.UnrecognizedVariant) S { return .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = u }; } }.wrapUnknown,\n`,
+    );
+    this.push(`struct {\n`);
+    this.push(
+      `fn getUnknown(x: *const S) ?skir_client.UnrecognizedVariant {\n`,
+    );
+    this.push(`return switch (x.*) {\n`);
+    this.push(`.${GENERATED_UNKNOWN_VARIANT_NAME} => |u| u,\n`);
+    this.push(`else => null,\n`);
+    this.push(`};\n`);
+    this.push(`}\n`);
+    this.push(`}.getUnknown,\n`);
+    this.push(`) catch unreachable;\n`);
+
+    for (const removedNumber of loc.record.removedNumbers) {
+      this.push(
+        `Holder.adapter.addRemovedNumber(${removedNumber}) catch unreachable;\n`,
+      );
+    }
+
+    kindOrdinal = 1;
+    for (const variant of loc.record.fields) {
+      const variantName = toVariantName(variant.name.text);
+      const doc = toZigStringLiteral(docToCommentText(variant.doc));
+      if (variant.type) {
+        const rawType = this.typeSpeller.getZigType(variant.type);
+        const payloadType =
+          variant.isRecursive !== false ? `*const ${rawType}` : rawType;
+        const serializerExpr =
+          variant.isRecursive !== false
+            ? `skir_client.pointerSerializer(${rawType}, ${this.getSerializerExpr(variant.type)})`
+            : this.getSerializerExpr(variant.type);
+        this.push(`Holder.adapter.addWrapperVariant(\n`);
+        this.push(`${payloadType},\n`);
+        this.push(`${toZigStringLiteral(variant.name.text)},\n`);
+        this.push(`${variant.number},\n`);
+        this.push(`${kindOrdinal},\n`);
+        this.push(`${serializerExpr},\n`);
+        this.push(`${doc},\n`);
+        this.push(
+          `struct { fn wrap(v: ${payloadType}) S { return .{ .${variantName} = v }; } }.wrap,\n`,
+        );
+        this.push(`struct {\n`);
+        this.push(`fn getValue(x: *const S) ${payloadType} {\n`);
+        this.push(`return switch (x.*) {\n`);
+        this.push(`.${variantName} => |v| v,\n`);
+        this.push(`else => unreachable,\n`);
+        this.push(`};\n`);
+        this.push(`}\n`);
+        this.push(`}.getValue,\n`);
+        this.push(`) catch unreachable;\n`);
+      } else {
+        this.push(
+          `Holder.adapter.addConstantVariant(${toZigStringLiteral(variant.name.text)}, ${variant.number}, ${kindOrdinal}, ${doc}, @as(S, .${variantName})) catch unreachable;\n`,
+        );
+      }
+      kindOrdinal += 1;
+    }
+
+    this.push(`Holder.adapter.finalize() catch unreachable;\n`);
+    this.push(`Holder.initialized = true;\n`);
+    this.push(`}\n`);
+    this.push(`return &Holder.adapter;\n`);
+    this.push(`}\n`);
+
+    this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(
+      `return skir_client.enumSerializerFromStatic(@This(), @This()._adapter);\n`,
+    );
+    this.push(`}\n`);
+  }
+
+  private getSerializerExpr(type: ResolvedType): string {
+    switch (type.kind) {
+      case "primitive":
+        return this.getPrimitiveSerializerExpr(type.primitive);
+      case "optional":
+        return `skir_client.optionalSerializer(${this.typeSpeller.getZigType(type.other)}, ${this.getSerializerExpr(type.other)})`;
+      case "array": {
+        const inner = this.getSerializerExpr(type.item);
+        if (type.key) {
+          const spec = this.keyedArrayContext.getKeySpecForArrayType(
+            type,
+            this.typeSpeller,
+          );
+          if (spec) {
+            return `skir_client.keyedArraySerializer(${spec.specRef}, ${inner})`;
+          }
+        }
+        return `skir_client.arraySerializer(${this.typeSpeller.getZigType(type.item)}, ${inner})`;
+      }
+      case "record":
+        return `${this.typeSpeller.getZigType(type)}.serializer()`;
+    }
+  }
+
+  private getPrimitiveSerializerExpr(
+    primitive:
+      | "bool"
+      | "int32"
+      | "int64"
+      | "hash64"
+      | "float32"
+      | "float64"
+      | "timestamp"
+      | "string"
+      | "bytes",
+  ): string {
+    switch (primitive) {
+      case "bool":
+        return "skir_client.boolSerializer()";
+      case "int32":
+        return "skir_client.int32Serializer()";
+      case "int64":
+        return "skir_client.int64Serializer()";
+      case "hash64":
+        return "skir_client.hash64Serializer()";
+      case "float32":
+        return "skir_client.float32Serializer()";
+      case "float64":
+        return "skir_client.float64Serializer()";
+      case "timestamp":
+        return "skir_client.timestampSerializer()";
+      case "string":
+        return "skir_client.stringSerializer()";
+      case "bytes":
+        return "skir_client.bytesSerializer()";
+    }
   }
 
   private writeKeySpec(keySpec: KeySpec): void {

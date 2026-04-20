@@ -819,6 +819,10 @@ pub const BytesAdapter = struct {
 pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(?T) {
     const ivt = inner._vtable;
     const Adapter = struct {
+        pub fn isDefault(_: @This(), value: ?T) bool {
+            return value == null;
+        }
+
         pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: ?T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
             if (value) |v| {
                 try ivt.toJsonFn(alloc, v, eol, out);
@@ -860,6 +864,92 @@ pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Seria
     return Serializer(?T).fromAdapter(Adapter);
 }
 
+pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(@import("recursive.zig").Recursive(T)) {
+    const Recursive = @import("recursive.zig").Recursive(T);
+    const ivt = inner._vtable;
+    const Adapter = struct {
+        pub fn isDefault(_: @This(), value: Recursive) bool {
+            return switch (value) {
+                .default_value => true,
+                .value => |p| ivt.isDefaultFn(p.*),
+            };
+        }
+
+        pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: Recursive, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+            switch (value) {
+                .default_value => try ivt.toJsonFn(alloc, T.default, eol, out),
+                .value => |p| try ivt.toJsonFn(alloc, p.*, eol, out),
+            }
+        }
+
+        pub fn fromJson(_: @This(), alloc: std.mem.Allocator, json: std.json.Value, keep: bool) anyerror!Recursive {
+            const v = try ivt.fromJsonFn(alloc, json, keep);
+            if (ivt.isDefaultFn(v)) return .default_value;
+            const p = try alloc.create(T);
+            p.* = v;
+            return .{ .value = p };
+        }
+
+        pub fn encode(_: @This(), alloc: std.mem.Allocator, value: Recursive, out: *std.ArrayList(u8)) anyerror!void {
+            switch (value) {
+                .default_value => try ivt.encodeFn(alloc, T.default, out),
+                .value => |p| try ivt.encodeFn(alloc, p.*, out),
+            }
+        }
+
+        pub fn decode(_: @This(), alloc: std.mem.Allocator, input: *[]const u8, keep: bool) anyerror!Recursive {
+            const v = try ivt.decodeFn(alloc, input, keep);
+            if (ivt.isDefaultFn(v)) return .default_value;
+            const p = try alloc.create(T);
+            p.* = v;
+            return .{ .value = p };
+        }
+
+        pub fn typeDescriptor(_: @This()) TypeDescriptor {
+            return ivt.typeDescriptorFn();
+        }
+    };
+
+    return Serializer(Recursive).fromAdapter(Adapter);
+}
+
+pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(*const T) {
+    const ivt = inner._vtable;
+    const Adapter = struct {
+        pub fn isDefault(_: @This(), value: *const T) bool {
+            return ivt.isDefaultFn(value.*);
+        }
+
+        pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: *const T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+            try ivt.toJsonFn(alloc, value.*, eol, out);
+        }
+
+        pub fn fromJson(_: @This(), alloc: std.mem.Allocator, json: std.json.Value, keep: bool) anyerror!*const T {
+            const v = try ivt.fromJsonFn(alloc, json, keep);
+            const p = try alloc.create(T);
+            p.* = v;
+            return p;
+        }
+
+        pub fn encode(_: @This(), alloc: std.mem.Allocator, value: *const T, out: *std.ArrayList(u8)) anyerror!void {
+            try ivt.encodeFn(alloc, value.*, out);
+        }
+
+        pub fn decode(_: @This(), alloc: std.mem.Allocator, input: *[]const u8, keep: bool) anyerror!*const T {
+            const v = try ivt.decodeFn(alloc, input, keep);
+            const p = try alloc.create(T);
+            p.* = v;
+            return p;
+        }
+
+        pub fn typeDescriptor(_: @This()) TypeDescriptor {
+            return ivt.typeDescriptorFn();
+        }
+    };
+
+    return Serializer(*const T).fromAdapter(Adapter);
+}
+
 /// Returns a serializer for slice values of type `[]const T`.
 ///
 /// Dense JSON:    `[v1,v2,...]`
@@ -869,6 +959,10 @@ pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Seria
 pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializer([]const T) {
     const ivt = inner._vtable;
     const Adapter = struct {
+        pub fn isDefault(_: @This(), value: []const T) bool {
+            return value.len == 0;
+        }
+
         pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: []const T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
             try out.append(alloc, '[');
             if (eol) |eol_str| {
@@ -960,6 +1054,10 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
     };
 
     const Adapter = struct {
+        pub fn isDefault(_: @This(), value: KArr) bool {
+            return value.values.len == 0;
+        }
+
         pub fn toJson(_: @This(), alloc: std.mem.Allocator, value: KArr, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
             try out.append(alloc, '[');
             if (eol) |eol_str| {

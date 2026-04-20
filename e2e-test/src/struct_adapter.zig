@@ -103,13 +103,11 @@ pub fn StructAdapter(comptime T: type) type {
             doc: []const u8,
             getter: *const fn (*const T) V,
             setter: *const fn (*T, V) void,
-            is_default: *const fn (*const T) bool,
         ) !void {
             const Ctx = struct {
                 ser: s.Serializer(V),
                 getter: *const fn (*const T) V,
                 setter: *const fn (*T, V) void,
-                is_default: *const fn (*const T) bool,
             };
             const Ops = struct {
                 fn freeCtx(alloc: std.mem.Allocator, ctx_ptr: *anyopaque) void {
@@ -119,7 +117,7 @@ pub fn StructAdapter(comptime T: type) type {
 
                 fn isDefault(ctx_ptr: *const anyopaque, value: *const T) bool {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
-                    return ctx.is_default(value);
+                    return ctx.ser.isDefault(ctx.getter(value));
                 }
 
                 fn toJson(ctx_ptr: *const anyopaque, alloc: std.mem.Allocator, value: *const T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -155,7 +153,6 @@ pub fn StructAdapter(comptime T: type) type {
                 .ser = ser,
                 .getter = getter,
                 .setter = setter,
-                .is_default = is_default,
             };
 
             const entry: FieldEntry = .{
@@ -415,6 +412,32 @@ pub fn StructAdapter(comptime T: type) type {
     };
 }
 
-pub fn structSerializerFromStatic(comptime T: type, _: *const StructAdapter(T)) s.Serializer(T) {
-    @compileError("structSerializerFromStatic cannot be implemented with current Serializer VTable because it has no adapter context pointer");
+pub fn structSerializerFromStatic(comptime T: type, comptime get_adapter: *const fn () *StructAdapter(T)) s.Serializer(T) {
+    const Impl = struct {
+        pub fn isDefault(_: @This(), input: T) bool {
+            return get_adapter().isDefault(&input);
+        }
+
+        pub fn toJson(_: @This(), allocator: std.mem.Allocator, input: T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+            return get_adapter().toJson(allocator, &input, eol_indent, out);
+        }
+
+        pub fn fromJson(_: @This(), allocator: std.mem.Allocator, json: std.json.Value, keep_unrecognized: bool) anyerror!T {
+            return get_adapter().fromJson(allocator, json, keep_unrecognized);
+        }
+
+        pub fn encode(_: @This(), allocator: std.mem.Allocator, input: T, out: *std.ArrayList(u8)) anyerror!void {
+            return get_adapter().encode(allocator, &input, out);
+        }
+
+        pub fn decode(_: @This(), allocator: std.mem.Allocator, input: *[]const u8, keep_unrecognized: bool) anyerror!T {
+            return get_adapter().decode(allocator, input, keep_unrecognized);
+        }
+
+        pub fn typeDescriptor(_: @This()) s.TypeDescriptor {
+            return get_adapter().typeDescriptor() catch unreachable;
+        }
+    };
+
+    return s.Serializer(T).fromAdapter(Impl);
 }

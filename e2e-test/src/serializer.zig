@@ -34,6 +34,7 @@ pub fn Serializer(comptime T: type) type {
         // comptime-constant. The vtable holds plain function pointers with no
         // runtime context pointer.
         pub const VTable = struct {
+            isDefaultFn: *const fn (T) bool,
             toJsonFn: *const fn (std.mem.Allocator, T, ?[]const u8, *std.ArrayList(u8)) anyerror!void,
             fromJsonFn: *const fn (std.mem.Allocator, std.json.Value, bool) anyerror!T,
             encodeFn: *const fn (std.mem.Allocator, T, *std.ArrayList(u8)) anyerror!void,
@@ -43,6 +44,11 @@ pub fn Serializer(comptime T: type) type {
 
         fn vtableFor(comptime Impl: type) *const VTable {
             return &struct {
+                fn doIsDefault(value: T) bool {
+                    const impl: Impl = .{};
+                    return impl.isDefault(value);
+                }
+
                 fn doTypeDescriptor() TypeDescriptor {
                     const impl: Impl = .{};
                     return impl.typeDescriptor();
@@ -69,6 +75,7 @@ pub fn Serializer(comptime T: type) type {
                 }
 
                 const vt: VTable = .{
+                    .isDefaultFn = doIsDefault,
                     .toJsonFn = doToJson,
                     .fromJsonFn = doFromJson,
                     .encodeFn = doEncode,
@@ -81,6 +88,9 @@ pub fn Serializer(comptime T: type) type {
         // Stub implementation for default-initialized Serializers (generated
         // record types fill this in via their own generated adapter).
         const StubImpl = struct {
+            pub fn isDefault(_: @This(), _: T) bool {
+                return false;
+            }
             pub fn toJson(_: @This(), _: std.mem.Allocator, _: T, _: ?[]const u8, _: *std.ArrayList(u8)) anyerror!void {}
             pub fn fromJson(_: @This(), _: std.mem.Allocator, _: std.json.Value, _: bool) anyerror!T {
                 return error.Stub;
@@ -138,6 +148,10 @@ pub fn Serializer(comptime T: type) type {
                 defer parsed.deinit();
                 return self._vtable.fromJsonFn(allocator, parsed.value, opts.keepUnrecognizedValues);
             }
+        }
+
+        pub fn isDefault(self: Self, value: T) bool {
+            return self._vtable.isDefaultFn(value);
         }
 
         /// Returns the `TypeDescriptor` describing the shape of `T`.
