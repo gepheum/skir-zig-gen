@@ -1,5 +1,6 @@
 const std = @import("std");
 const base_serializer = @import("serializer.zig");
+const decode_utils = @import("decode_utils.zig");
 const Timestamp = @import("timestamp.zig").Timestamp;
 const UnrecognizedFields = @import("unrecognized.zig").UnrecognizedFields;
 const UnrecognizedVariant = @import("unrecognized.zig").UnrecognizedVariant;
@@ -21,6 +22,14 @@ const EnumVariant = base_serializer.EnumVariant;
 const StructDescriptor = base_serializer.StructDescriptor;
 const EnumDescriptor = base_serializer.EnumDescriptor;
 const TypeDescriptor = base_serializer.TypeDescriptor;
+const readU8 = decode_utils.readU8;
+const readU16Le = decode_utils.readU16Le;
+const readU32Le = decode_utils.readU32Le;
+const readU64Le = decode_utils.readU64Le;
+const decodeNumberBody = decode_utils.decodeNumberBody;
+const decodeNumber = decode_utils.decodeNumber;
+const encodeUint32 = decode_utils.encodeUint32;
+const writeJsonEscapedString = decode_utils.writeJsonEscapedString;
 
 // =============================================================================
 // BoolAdapter
@@ -73,59 +82,6 @@ pub const BoolAdapter = struct {
     }
 };
 
-// =============================================================================
-// Binary I/O helpers — variable-length number encoding (shared by numeric adapters)
-// =============================================================================
-
-fn readU8(input: *[]const u8) error{UnexpectedEndOfInput}!u8 {
-    if (input.len == 0) return error.UnexpectedEndOfInput;
-    const b = input.*[0];
-    input.* = input.*[1..];
-    return b;
-}
-
-fn readU16Le(input: *[]const u8) error{UnexpectedEndOfInput}!u16 {
-    if (input.len < 2) return error.UnexpectedEndOfInput;
-    const v = std.mem.readInt(u16, input.*[0..2], .little);
-    input.* = input.*[2..];
-    return v;
-}
-
-fn readU32Le(input: *[]const u8) error{UnexpectedEndOfInput}!u32 {
-    if (input.len < 4) return error.UnexpectedEndOfInput;
-    const v = std.mem.readInt(u32, input.*[0..4], .little);
-    input.* = input.*[4..];
-    return v;
-}
-
-fn readU64Le(input: *[]const u8) error{UnexpectedEndOfInput}!u64 {
-    if (input.len < 8) return error.UnexpectedEndOfInput;
-    const v = std.mem.readInt(u64, input.*[0..8], .little);
-    input.* = input.*[8..];
-    return v;
-}
-
-/// Decodes the body of a variable-length number given the already-consumed wire byte.
-fn decodeNumberBody(wire: u8, input: *[]const u8) error{UnexpectedEndOfInput}!i64 {
-    return switch (wire) {
-        0...231 => @as(i64, wire),
-        232 => @as(i64, try readU16Le(input)),
-        233 => @as(i64, try readU32Le(input)),
-        234 => @as(i64, @bitCast(try readU64Le(input))),
-        235 => @as(i64, try readU8(input)) - 256,
-        236 => @as(i64, try readU16Le(input)) - 65536,
-        237 => @as(i64, @as(i32, @bitCast(try readU32Le(input)))),
-        238, 239 => @as(i64, @bitCast(try readU64Le(input))),
-        else => 0,
-    };
-}
-
-/// Reads and decodes the next variable-length number.
-fn decodeNumber(input: *[]const u8) error{UnexpectedEndOfInput}!i64 {
-    const wire = try readU8(input);
-    return decodeNumberBody(wire, input);
-}
-
 /// Encodes an `i32` using the skir variable-length wire format.
 fn encodeI32(v: i32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
     if (v >= std.math.minInt(i32) and v <= -65537) {
@@ -145,24 +101,6 @@ fn encodeI32(v: i32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anye
     } else {
         try out.append(allocator, 233);
         try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u32, @bitCast(v))));
-    }
-}
-
-/// Encodes a non-negative integer as a variable-length unsigned value used for
-/// array lengths and string/bytes sizes.
-///
-///  0..=231   → single byte equal to the value
-///  232..=65535 → wire 232 + u16 LE
-///  else      → wire 233 + u32 LE
-fn encodeUint32(n: u32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
-    if (n <= 231) {
-        try out.append(allocator, @intCast(n));
-    } else if (n <= 65535) {
-        try out.append(allocator, 232);
-        try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u16, @intCast(n))));
-    } else {
-        try out.append(allocator, 233);
-        try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u32, n)));
     }
 }
 
@@ -606,30 +544,6 @@ pub const Float64Adapter = struct {
 // =============================================================================
 // String helpers
 // =============================================================================
-
-/// Writes `s` as a JSON string literal to `out`, escaping `"`, `\`, and
-/// control characters (matching the Rust `write_json_escaped_string`).
-fn writeJsonEscapedString(s: []const u8, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
-    try out.append(allocator, '"');
-    for (s) |c| {
-        switch (c) {
-            '"' => try out.appendSlice(allocator, "\\\""),
-            '\\' => try out.appendSlice(allocator, "\\\\"),
-            '\n' => try out.appendSlice(allocator, "\\n"),
-            '\r' => try out.appendSlice(allocator, "\\r"),
-            '\t' => try out.appendSlice(allocator, "\\t"),
-            '\x08' => try out.appendSlice(allocator, "\\b"),
-            '\x0C' => try out.appendSlice(allocator, "\\f"),
-            0x00...0x07, 0x0B, 0x0E...0x1F, 0x7F => {
-                var buf: [6]u8 = undefined;
-                const written = std.fmt.bufPrint(&buf, "\\u{x:0>4}", .{c}) catch unreachable;
-                try out.appendSlice(allocator, written);
-            },
-            else => try out.append(allocator, c),
-        }
-    }
-    try out.append(allocator, '"');
-}
 
 /// Copies `bytes` to a newly-allocated slice, replacing any invalid UTF-8
 /// sequences with the replacement character U+FFFD (0xEF 0xBF 0xBD).
