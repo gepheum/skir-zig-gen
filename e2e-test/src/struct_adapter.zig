@@ -1,9 +1,10 @@
 const std = @import("std");
-const s = @import("serializers.zig");
+const s = @import("serializer.zig");
+const unrecognized = @import("unrecognized.zig");
 
 /// Type-erased struct adapter modeled after skir-rust-client StructAdapter.
 ///
-/// Note: the current Zig Serializer in serializers.zig stores only function
+/// Note: the current Zig Serializer in serializer.zig stores only function
 /// pointers and no runtime context pointer, so this adapter is standalone and
 /// is meant to be called directly by generated code (or by a future serializer
 /// runtime that can carry adapter instance state).
@@ -29,8 +30,8 @@ pub fn StructAdapter(comptime T: type) type {
         module_path: []const u8,
         qualified_name: []const u8,
         doc: []const u8,
-        get_unrecognized: *const fn (*const T) ?s.UnrecognizedFields,
-        set_unrecognized: *const fn (*T, ?s.UnrecognizedFields) void,
+        get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedFields,
+        set_unrecognized: *const fn (*T, ?unrecognized.UnrecognizedFields) void,
 
         ordered_entries: std.ArrayList(FieldEntry),
         name_to_index: std.StringHashMap(usize),
@@ -43,8 +44,8 @@ pub fn StructAdapter(comptime T: type) type {
             module_path: []const u8,
             qualified_name: []const u8,
             doc: []const u8,
-            get_unrecognized: *const fn (*const T) ?s.UnrecognizedFields,
-            set_unrecognized: *const fn (*T, ?s.UnrecognizedFields) void,
+            get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedFields,
+            set_unrecognized: *const fn (*T, ?unrecognized.UnrecognizedFields) void,
         ) !Self {
             return .{
                 .allocator = allocator,

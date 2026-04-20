@@ -1,11 +1,12 @@
 const std = @import("std");
-const s = @import("serializers.zig");
+const s = @import("serializer.zig");
+const unrecognized = @import("unrecognized.zig");
 const struct_adapter = @import("struct_adapter.zig");
 
 /// Type-erased enum adapter modeled after skir-rust-client EnumAdapter.
 ///
 /// Note: like StructAdapter, this is currently standalone because Serializer
-/// in serializers.zig cannot hold a runtime adapter context pointer.
+/// in serializer.zig cannot hold a runtime adapter context pointer.
 pub fn EnumAdapter(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -39,8 +40,8 @@ pub fn EnumAdapter(comptime T: type) type {
         doc: []const u8,
 
         get_kind_ordinal: *const fn (*const T) usize,
-        wrap_unrecognized: *const fn (s.UnrecognizedVariant) T,
-        get_unrecognized: *const fn (*const T) ?s.UnrecognizedVariant,
+        wrap_unrecognized: *const fn (unrecognized.UnrecognizedVariant) T,
+        get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedVariant,
 
         number_to_entry: std.AutoHashMap(i32, AnyEntry),
         removed_numbers: std.ArrayList(i32),
@@ -54,8 +55,8 @@ pub fn EnumAdapter(comptime T: type) type {
             qualified_name: []const u8,
             doc: []const u8,
             get_kind_ordinal: *const fn (*const T) usize,
-            wrap_unrecognized: *const fn (s.UnrecognizedVariant) T,
-            get_unrecognized: *const fn (*const T) ?s.UnrecognizedVariant,
+            wrap_unrecognized: *const fn (unrecognized.UnrecognizedVariant) T,
+            get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedVariant,
         ) !Self {
             var kind_entries: std.ArrayList(?VariantEntry) = .empty;
             try kind_entries.append(allocator, null); // kind ordinal 0 = UNKNOWN pseudo-entry
