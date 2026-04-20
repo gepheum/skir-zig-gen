@@ -19,7 +19,6 @@ import {
   modulePathToOutputPath,
   toFieldGetterName,
   toStructFieldName,
-  toTypeName,
   toVariantName,
 } from "./naming.js";
 import { TypeSpeller } from "./type_speller.js";
@@ -170,12 +169,6 @@ class ZigSourceFileGenerator {
     }
 
     for (const field of loc.record.fields) {
-      if (field.isRecursive !== false) {
-        this.writeRecursiveFieldType(field);
-      }
-    }
-
-    for (const field of loc.record.fields) {
       this.writeStructField(field);
     }
 
@@ -275,8 +268,9 @@ class ZigSourceFileGenerator {
 
     if (field.isRecursive !== false) {
       const storageName = this.getRecursiveStorageName(field);
+      const rawType = this.typeSpeller.getZigType(field.type!);
       this.push(comment);
-      this.push(`${storageName}: ${this.getRecursiveTypeName(field)},\n`);
+      this.push(`${storageName}: skir_client.Recursive(${rawType}),\n`);
       return;
     }
 
@@ -301,16 +295,6 @@ class ZigSourceFileGenerator {
     this.push(`}\n`);
   }
 
-  private writeRecursiveFieldType(field: Field): void {
-    const recursiveTypeName = this.getRecursiveTypeName(field);
-    const rawType = this.typeSpeller.getZigType(field.type!);
-
-    this.push(`pub const ${recursiveTypeName} = union(enum) {\n`);
-    this.push(`default_value,\n`);
-    this.push(`value: *const ${rawType},\n`);
-    this.push(`};\n`);
-  }
-
   private writeKeySpec(keySpec: KeySpec): void {
     this.push(`pub const ${keySpec.specName} = struct {\n`);
     this.push(`pub const Value = ${keySpec.valueType};\n`);
@@ -329,10 +313,6 @@ class ZigSourceFileGenerator {
 
   private getRecursiveStorageName(field: Field): string {
     return `_${toStructFieldName(field.name.text)}`;
-  }
-
-  private getRecursiveTypeName(field: Field): string {
-    return `${toTypeName(field.name.text)}Recursive`;
   }
 
   private collectRecordImports(record: Record): void {

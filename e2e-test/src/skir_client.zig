@@ -2,8 +2,11 @@ const s = @import("serializers.zig");
 const core = @import("serializer.zig");
 const timestamp = @import("timestamp.zig");
 const unrecognized = @import("unrecognized.zig");
+const recursive = @import("recursive.zig");
 const struct_adapter = @import("struct_adapter.zig");
 const enum_adapter = @import("enum_adapter.zig");
+
+pub const Recursive = recursive.Recursive;
 
 pub const UnrecognizedFields = unrecognized.UnrecognizedFields;
 pub const UnrecognizedVariant = unrecognized.UnrecognizedVariant;
