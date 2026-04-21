@@ -1333,7 +1333,7 @@ test "boolSerializer: binary encoding false is skir then 0x00" {
 }
 
 test "boolSerializer: typeDescriptor is primitive bool" {
-    const td = boolSerializer().typeDescriptor();
+    const td = try boolSerializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Bool, td.primitive);
 }
@@ -1467,7 +1467,7 @@ test "int32Serializer: binary round-trip" {
 }
 
 test "int32Serializer: typeDescriptor is primitive int32" {
-    const td = int32Serializer().typeDescriptor();
+    const td = try int32Serializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Int32, td.primitive);
 }
@@ -1552,7 +1552,7 @@ test "int64Serializer: binary round-trip" {
 }
 
 test "int64Serializer: typeDescriptor is primitive int64" {
-    const td = int64Serializer().typeDescriptor();
+    const td = try int64Serializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Int64, td.primitive);
 }
@@ -1655,7 +1655,7 @@ test "hash64Serializer: binary round-trip" {
 }
 
 test "hash64Serializer: typeDescriptor is primitive hash64" {
-    const td = hash64Serializer().typeDescriptor();
+    const td = try hash64Serializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Hash64, td.primitive);
 }
@@ -1762,7 +1762,7 @@ test "timestampSerializer: binary round-trip" {
 }
 
 test "timestampSerializer: typeDescriptor is primitive timestamp" {
-    const td = timestampSerializer().typeDescriptor();
+    const td = try timestampSerializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Timestamp, td.primitive);
 }
@@ -1838,7 +1838,7 @@ test "optionalSerializer: binary round-trip" {
 }
 
 test "optionalSerializer: typeDescriptor is optional of int32" {
-    const td = optionalSerializer(i32, int32Serializer()).typeDescriptor();
+    const td = try optionalSerializer(i32, int32Serializer()).typeDescriptor(std.heap.page_allocator);
     try std.testing.expect(td == .optional);
     try std.testing.expectEqual(PrimitiveType.Int32, td.optional.primitive);
 }
@@ -1921,7 +1921,7 @@ test "arraySerializer: binary round-trip" {
 }
 
 test "arraySerializer: typeDescriptor is array of int32" {
-    const td = arraySerializer(i32, int32Serializer()).typeDescriptor();
+    const td = try arraySerializer(i32, int32Serializer()).typeDescriptor(std.heap.page_allocator);
     try std.testing.expect(td == .array);
     try std.testing.expectEqual(PrimitiveType.Int32, td.array.item_type.primitive);
 }
@@ -1991,7 +1991,7 @@ test "keyedArraySerializer: binary round-trip" {
 }
 
 test "keyedArraySerializer: typeDescriptor includes key extractor" {
-    const td = keyedArraySerializer(TestIntKeyedSpec, int32Serializer()).typeDescriptor();
+    const td = try keyedArraySerializer(TestIntKeyedSpec, int32Serializer()).typeDescriptor(std.heap.page_allocator);
     try std.testing.expect(td == .array);
     try std.testing.expectEqual(PrimitiveType.Int32, td.array.item_type.primitive);
     try std.testing.expectEqualStrings("self", td.array.key_extractor);
@@ -2079,7 +2079,7 @@ test "bytesSerializer: binary round-trip" {
 }
 
 test "bytesSerializer: typeDescriptor is primitive bytes" {
-    const td = bytesSerializer().typeDescriptor();
+    const td = try bytesSerializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Bytes, td.primitive);
 }
@@ -2173,7 +2173,7 @@ test "float32Serializer: binary round-trip" {
 }
 
 test "float32Serializer: typeDescriptor is primitive float32" {
-    const td = float32Serializer().typeDescriptor();
+    const td = try float32Serializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Float32, td.primitive);
 }
@@ -2267,7 +2267,7 @@ test "float64Serializer: binary round-trip" {
 }
 
 test "float64Serializer: typeDescriptor is primitive float64" {
-    const td = float64Serializer().typeDescriptor();
+    const td = try float64Serializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Float64, td.primitive);
 }
@@ -2372,7 +2372,7 @@ test "stringSerializer: decode invalid utf8 replaced with U+FFFD" {
 }
 
 test "stringSerializer: typeDescriptor is primitive string" {
-    const td = stringSerializer().typeDescriptor();
+    const td = try stringSerializer().typeDescriptor(std.testing.allocator);
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.String, td.primitive);
 }

@@ -119,7 +119,7 @@ pub fn StructAdapter(comptime T: type) type {
 
                 fn isDefault(ctx_ptr: *const anyopaque, value: *const T) bool {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
-                    return ctx.ser.isDefault(ctx.getter(value));
+                    return ctx.ser._vtable.isDefaultFn(ctx.getter(value));
                 }
 
                 fn toJson(ctx_ptr: *const anyopaque, alloc: std.mem.Allocator, value: *const T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {

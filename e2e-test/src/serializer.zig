@@ -173,24 +173,10 @@ pub fn Serializer(comptime T: type) type {
             }
         }
 
-        pub fn isDefault(self: Self, value: T) bool {
-            return self._vtable.isDefaultFn(value);
-        }
-
-        /// Returns an allocator-owned descriptor when context requires it.
-        pub fn typeDescriptorAlloc(self: Self, allocator: std.mem.Allocator) !TypeDescriptor {
+        /// Returns the `TypeDescriptor` describing the shape of `T`.
+        pub fn typeDescriptor(self: Self, allocator: std.mem.Allocator) !TypeDescriptor {
             if (self._ctx_type_descriptor_fn) |f| {
                 return f(self._ctx, allocator);
-            }
-            return self._vtable.typeDescriptorFn();
-        }
-
-        /// Returns the `TypeDescriptor` describing the shape of `T`.
-        ///
-        /// For context-aware serializers, this uses `page_allocator` under the hood.
-        pub fn typeDescriptor(self: Self) TypeDescriptor {
-            if (self._ctx_type_descriptor_fn) |f| {
-                return f(self._ctx, std.heap.page_allocator) catch unreachable;
             }
             return self._vtable.typeDescriptorFn();
         }
