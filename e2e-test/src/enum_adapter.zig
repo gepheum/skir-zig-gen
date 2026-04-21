@@ -41,7 +41,7 @@ pub fn EnumAdapter(comptime T: type) type {
             encode_value_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, *std.ArrayList(u8)) anyerror!void,
             wrap_decode_fn: *const fn (*const anyopaque, std.mem.Allocator, *[]const u8, bool) anyerror!T,
             wrap_default_fn: *const fn (*const anyopaque) ?T,
-            variant_type_fn: *const fn (*const anyopaque) ?td.TypeDescriptor,
+            variant_type_fn: *const fn (*const anyopaque, std.mem.Allocator) anyerror!?td.TypeDescriptor,
         };
 
         allocator: std.mem.Allocator,
@@ -189,7 +189,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     return ctx.instance;
                 }
 
-                fn variantType(_: *const anyopaque) ?td.TypeDescriptor {
+                fn variantType(_: *const anyopaque, _: std.mem.Allocator) anyerror!?td.TypeDescriptor {
                     return null;
                 }
             };
@@ -313,9 +313,9 @@ pub fn EnumAdapter(comptime T: type) type {
                     return ctx.wrap(inner);
                 }
 
-                fn variantType(ctx_ptr: *const anyopaque) ?td.TypeDescriptor {
+                fn variantType(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator) anyerror!?td.TypeDescriptor {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
-                    return ctx.ser._vtable.typeDescriptorFn();
+                    return try ctx.ser._vtable.typeDescriptorFn(allocator);
                 }
             };
 
@@ -428,7 +428,7 @@ pub fn EnumAdapter(comptime T: type) type {
                                 .wrapper => |kind_ordinal| {
                                     if (kind_ordinal < self.kind_ordinal_to_entry.items.len) {
                                         if (self.kind_ordinal_to_entry.items[kind_ordinal]) |entry| {
-                                            const variant_td = entry.variant_type_fn(entry.ctx) orelse unreachable;
+                                            const variant_td = (try entry.variant_type_fn(entry.ctx, self.allocator)) orelse unreachable;
                                             const ptr = try self.allocator.create(td.TypeDescriptor);
                                             ptr.* = variant_td;
                                             vt_ptr = ptr;
@@ -875,8 +875,9 @@ pub fn enumSerializerFromStatic(comptime T: type, comptime get_adapter: *const f
             return get_adapter().decode(allocator, input, keep_unrecognized);
         }
 
-        pub fn typeDescriptor(_: @This()) td.TypeDescriptor {
-            return get_adapter().typeDescriptor() catch unreachable;
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!td.TypeDescriptor {
+            _ = allocator;
+            return get_adapter().typeDescriptor();
         }
     };
 

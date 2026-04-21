@@ -1,4 +1,5 @@
 // TODO: typeDescriptorFn should expect an allocator... The structure of Serializer makes no sense...
+// TODO: arraySerializer(i32, int32Serializer()) -> arraySerializer(int32Serializer) -- if I just add a const type T to serializer?
 // TODO: add tempo conversion method to timestamp.zig
 // TODO: formatting, better end of lines, use the format thing to not worry about indent.
 // TODO: optimzie things?

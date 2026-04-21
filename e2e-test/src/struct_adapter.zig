@@ -34,7 +34,7 @@ pub fn StructAdapter(comptime T: type) type {
             set_from_json_fn: *const fn (*const anyopaque, std.mem.Allocator, *T, std.json.Value, bool) anyerror!void,
             encode_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, *std.ArrayList(u8)) anyerror!void,
             decode_into_fn: *const fn (*const anyopaque, std.mem.Allocator, *T, *[]const u8, bool) anyerror!void,
-            field_type_fn: *const fn (*const anyopaque) td.TypeDescriptor,
+            field_type_fn: *const fn (*const anyopaque, std.mem.Allocator) anyerror!td.TypeDescriptor,
         };
 
         allocator: std.mem.Allocator,
@@ -145,9 +145,9 @@ pub fn StructAdapter(comptime T: type) type {
                     ctx.setter(value, v);
                 }
 
-                fn fieldType(ctx_ptr: *const anyopaque) td.TypeDescriptor {
+                fn fieldType(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator) anyerror!td.TypeDescriptor {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
-                    return ctx.ser._vtable.typeDescriptorFn();
+                    return ctx.ser._vtable.typeDescriptorFn(allocator);
                 }
             };
 
@@ -231,7 +231,7 @@ pub fn StructAdapter(comptime T: type) type {
             const fields = try self.allocator.alloc(td.StructField, self.ordered_entries.items.len);
             for (self.ordered_entries.items, 0..) |entry, idx| {
                 const ft = try self.allocator.create(td.TypeDescriptor);
-                ft.* = entry.field_type_fn(entry.ctx);
+                ft.* = try entry.field_type_fn(entry.ctx, self.allocator);
                 fields[idx] = .{
                     .name = entry.name,
                     .number = entry.number,
@@ -686,8 +686,9 @@ pub fn structSerializerFromStatic(comptime T: type, comptime get_adapter: *const
             return get_adapter().decode(allocator, input, keep_unrecognized);
         }
 
-        pub fn typeDescriptor(_: @This()) td.TypeDescriptor {
-            return get_adapter().typeDescriptor() catch unreachable;
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!td.TypeDescriptor {
+            _ = allocator;
+            return get_adapter().typeDescriptor();
         }
     };
 

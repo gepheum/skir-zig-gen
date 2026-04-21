@@ -32,8 +32,6 @@ pub const SerializeFormat = enum {
 pub fn Serializer(comptime T: type) type {
     return struct {
         const Self = @This();
-        const CtxTypeDescriptorFn = *const fn (?*const anyopaque, std.mem.Allocator) anyerror!TypeDescriptor;
-        const CtxDeinitFn = *const fn (std.mem.Allocator, *anyopaque) void;
 
         // Each concrete adapter is a zero-size struct, so all behaviour is
         // comptime-constant. The vtable holds plain function pointers with no
@@ -44,7 +42,7 @@ pub fn Serializer(comptime T: type) type {
             fromJsonFn: *const fn (std.mem.Allocator, std.json.Value, bool) anyerror!T,
             encodeFn: *const fn (std.mem.Allocator, T, *std.ArrayList(u8)) anyerror!void,
             decodeFn: *const fn (std.mem.Allocator, *[]const u8, bool) anyerror!T,
-            typeDescriptorFn: *const fn () TypeDescriptor,
+            typeDescriptorFn: *const fn (std.mem.Allocator) anyerror!TypeDescriptor,
         };
 
         fn vtableFor(comptime Impl: type) *const VTable {
@@ -54,9 +52,9 @@ pub fn Serializer(comptime T: type) type {
                     return impl.isDefault(value);
                 }
 
-                fn doTypeDescriptor() TypeDescriptor {
+                fn doTypeDescriptor(allocator: std.mem.Allocator) anyerror!TypeDescriptor {
                     const impl: Impl = .{};
-                    return impl.typeDescriptor();
+                    return impl.typeDescriptor(allocator);
                 }
 
                 fn doToJson(alloc: std.mem.Allocator, value: T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -104,38 +102,17 @@ pub fn Serializer(comptime T: type) type {
             pub fn decode(_: @This(), _: std.mem.Allocator, _: *[]const u8, _: bool) anyerror!T {
                 return error.Stub;
             }
-            pub fn typeDescriptor(_: @This()) TypeDescriptor {
+            pub fn typeDescriptor(_: @This(), _: std.mem.Allocator) anyerror!TypeDescriptor {
                 return TypeDescriptor{ .primitive = .Bool };
             }
         };
 
         _vtable: *const VTable = vtableFor(StubImpl),
-        _ctx: ?*anyopaque = null,
-        _ctx_allocator: ?std.mem.Allocator = null,
-        _ctx_type_descriptor_fn: ?CtxTypeDescriptorFn = null,
-        _ctx_deinit_fn: ?CtxDeinitFn = null,
 
         /// Constructs a `Serializer` backed by the given adapter implementation.
         /// For use only by primitive/composite serializer factory functions.
         pub fn fromAdapter(comptime Impl: type) Self {
             return .{ ._vtable = vtableFor(Impl) };
-        }
-
-        /// Constructs a serializer backed by `Impl` and runtime context.
-        pub fn fromAdapterWithContext(
-            comptime Impl: type,
-            ctx: *anyopaque,
-            ctx_allocator: std.mem.Allocator,
-            ctx_type_descriptor_fn: CtxTypeDescriptorFn,
-            ctx_deinit_fn: CtxDeinitFn,
-        ) Self {
-            return .{
-                ._vtable = vtableFor(Impl),
-                ._ctx = ctx,
-                ._ctx_allocator = ctx_allocator,
-                ._ctx_type_descriptor_fn = ctx_type_descriptor_fn,
-                ._ctx_deinit_fn = ctx_deinit_fn,
-            };
         }
 
         // ── Public API ────────────────────────────────────────────────────────
@@ -178,22 +155,7 @@ pub fn Serializer(comptime T: type) type {
 
         /// Returns the `TypeDescriptor` describing the shape of `T`.
         pub fn typeDescriptor(self: Self, allocator: std.mem.Allocator) !TypeDescriptor {
-            if (self._ctx_type_descriptor_fn) |f| {
-                return f(self._ctx, allocator);
-            }
-            return self._vtable.typeDescriptorFn();
-        }
-
-        /// Releases runtime context owned by this serializer, if any.
-        pub fn deinit(self: *Self) void {
-            const ctx = self._ctx orelse return;
-            if (self._ctx_deinit_fn) |deinit_fn| {
-                deinit_fn(self._ctx_allocator orelse std.heap.page_allocator, ctx);
-            }
-            self._ctx = null;
-            self._ctx_allocator = null;
-            self._ctx_type_descriptor_fn = null;
-            self._ctx_deinit_fn = null;
+            return self._vtable.typeDescriptorFn(allocator);
         }
     };
 }
