@@ -1,14 +1,15 @@
-const s = @import("serializers.zig");
 const core = @import("serializer.zig");
-const type_descriptor = @import("type_descriptor.zig");
-const timestamp = @import("timestamp.zig");
-const unrecognized = @import("unrecognized.zig");
-const recursive = @import("recursive.zig");
-const struct_adapter = @import("struct_adapter.zig");
 const enum_adapter = @import("enum_adapter.zig");
+const keyed_array = @import("keyed_array.zig");
+const recursive = @import("recursive.zig");
+const serializers = @import("serializers.zig");
+const struct_adapter = @import("struct_adapter.zig");
+const timestamp = @import("timestamp.zig");
+const type_descriptor = @import("type_descriptor.zig");
+const unrecognized = @import("unrecognized.zig");
 
 // Core runtime types
-pub const KeyedArray = @import("keyed_array.zig").KeyedArray;
+pub const KeyedArray = keyed_array.KeyedArray;
 pub const Method = core.Method;
 pub const Recursive = recursive.Recursive;
 pub const SerializeFormat = core.SerializeFormat;
@@ -18,20 +19,20 @@ pub const UnrecognizedFields = unrecognized.UnrecognizedFields;
 pub const UnrecognizedVariant = unrecognized.UnrecognizedVariant;
 
 // Serializer factories
-pub const arraySerializer = s.arraySerializer;
-pub const boolSerializer = s.boolSerializer;
-pub const bytesSerializer = s.bytesSerializer;
-pub const float32Serializer = s.float32Serializer;
-pub const float64Serializer = s.float64Serializer;
-pub const hash64Serializer = s.hash64Serializer;
-pub const int32Serializer = s.int32Serializer;
-pub const int64Serializer = s.int64Serializer;
-pub const keyedArraySerializer = s.keyedArraySerializer;
-pub const optionalSerializer = s.optionalSerializer;
-pub const pointerSerializer = s.pointerSerializer;
-pub const recursiveSerializer = s.recursiveSerializer;
-pub const stringSerializer = s.stringSerializer;
-pub const timestampSerializer = s.timestampSerializer;
+pub const arraySerializer = serializers.arraySerializer;
+pub const boolSerializer = serializers.boolSerializer;
+pub const bytesSerializer = serializers.bytesSerializer;
+pub const float32Serializer = serializers.float32Serializer;
+pub const float64Serializer = serializers.float64Serializer;
+pub const hash64Serializer = serializers.hash64Serializer;
+pub const int32Serializer = serializers.int32Serializer;
+pub const int64Serializer = serializers.int64Serializer;
+pub const keyedArraySerializer = serializers.keyedArraySerializer;
+pub const optionalSerializer = serializers.optionalSerializer;
+pub const pointerSerializer = serializers.pointerSerializer;
+pub const recursiveSerializer = serializers.recursiveSerializer;
+pub const stringSerializer = serializers.stringSerializer;
+pub const timestampSerializer = serializers.timestampSerializer;
 
 // Type descriptors
 pub const ArrayDescriptor = type_descriptor.ArrayDescriptor;
