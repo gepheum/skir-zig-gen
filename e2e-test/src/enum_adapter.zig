@@ -1,5 +1,6 @@
 const std = @import("std");
 const s = @import("serializer.zig");
+const td = @import("type_descriptor.zig");
 const decode_utils = @import("decode_utils.zig");
 const unrecognized = @import("unrecognized.zig");
 const skipValue = decode_utils.skipValue;
@@ -40,7 +41,7 @@ pub fn EnumAdapter(comptime T: type) type {
             encode_value_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, *std.ArrayList(u8)) anyerror!void,
             wrap_decode_fn: *const fn (*const anyopaque, std.mem.Allocator, *[]const u8, bool) anyerror!T,
             wrap_default_fn: *const fn (*const anyopaque) ?T,
-            variant_type_fn: *const fn (*const anyopaque) ?s.TypeDescriptor,
+            variant_type_fn: *const fn (*const anyopaque) ?td.TypeDescriptor,
         };
 
         allocator: std.mem.Allocator,
@@ -56,7 +57,7 @@ pub fn EnumAdapter(comptime T: type) type {
         removed_numbers: std.ArrayList(i32),
         name_to_kind_ordinal: std.StringHashMap(usize),
         kind_ordinal_to_entry: std.ArrayList(?VariantEntry),
-        desc_variants: std.ArrayList(s.EnumVariant),
+        desc_variants: std.ArrayList(td.EnumVariant),
         descriptor_in_progress: bool,
 
         pub fn init(
@@ -188,7 +189,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     return ctx.instance;
                 }
 
-                fn variantType(_: *const anyopaque) ?s.TypeDescriptor {
+                fn variantType(_: *const anyopaque) ?td.TypeDescriptor {
                     return null;
                 }
             };
@@ -312,7 +313,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     return ctx.wrap(inner);
                 }
 
-                fn variantType(ctx_ptr: *const anyopaque) ?s.TypeDescriptor {
+                fn variantType(ctx_ptr: *const anyopaque) ?td.TypeDescriptor {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
                     return ctx.ser._vtable.typeDescriptorFn();
                 }
@@ -386,14 +387,14 @@ pub fn EnumAdapter(comptime T: type) type {
         }
 
         pub fn finalize(self: *Self) !void {
-            std.sort.pdq(s.EnumVariant, self.desc_variants.items, {}, struct {
-                fn lessThan(_: void, a: s.EnumVariant, b: s.EnumVariant) bool {
+            std.sort.pdq(td.EnumVariant, self.desc_variants.items, {}, struct {
+                fn lessThan(_: void, a: td.EnumVariant, b: td.EnumVariant) bool {
                     return a.number() < b.number();
                 }
             }.lessThan);
         }
 
-        pub fn descriptor(self: *const Self) !s.EnumDescriptor {
+        pub fn descriptor(self: *const Self) !td.EnumDescriptor {
             const self_mut: *Self = @constCast(self);
             if (self_mut.descriptor_in_progress) {
                 const removed_skeleton = try self.allocator.dupe(i32, self.removed_numbers.items);
@@ -402,7 +403,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     .qualified_name = self.qualified_name,
                     .module_path = self.module_path,
                     .doc = self.doc,
-                    .variants = &[_]s.EnumVariant{},
+                    .variants = &[_]td.EnumVariant{},
                     .removed_numbers = removed_skeleton,
                 };
             }
@@ -410,7 +411,7 @@ pub fn EnumAdapter(comptime T: type) type {
             self_mut.descriptor_in_progress = true;
             defer self_mut.descriptor_in_progress = false;
 
-            const variants = try self.allocator.alloc(s.EnumVariant, self.desc_variants.items.len);
+            const variants = try self.allocator.alloc(td.EnumVariant, self.desc_variants.items.len);
             for (self.desc_variants.items, 0..) |v, idx| {
                 switch (v) {
                     .constant => |c| {
@@ -421,15 +422,15 @@ pub fn EnumAdapter(comptime T: type) type {
                         } };
                     },
                     .wrapper => |w| {
-                        var vt_ptr: ?*const s.TypeDescriptor = null;
+                        var vt_ptr: ?*const td.TypeDescriptor = null;
                         if (self.number_to_entry.get(w.number)) |nk| {
                             switch (nk) {
                                 .wrapper => |kind_ordinal| {
                                     if (kind_ordinal < self.kind_ordinal_to_entry.items.len) {
                                         if (self.kind_ordinal_to_entry.items[kind_ordinal]) |entry| {
-                                            const td = entry.variant_type_fn(entry.ctx) orelse unreachable;
-                                            const ptr = try self.allocator.create(s.TypeDescriptor);
-                                            ptr.* = td;
+                                            const variant_td = entry.variant_type_fn(entry.ctx) orelse unreachable;
+                                            const ptr = try self.allocator.create(td.TypeDescriptor);
+                                            ptr.* = variant_td;
                                             vt_ptr = ptr;
                                         }
                                     }
@@ -839,7 +840,7 @@ pub fn EnumAdapter(comptime T: type) type {
             return T.default;
         }
 
-        pub fn typeDescriptor(self: *const Self) anyerror!s.TypeDescriptor {
+        pub fn typeDescriptor(self: *const Self) anyerror!td.TypeDescriptor {
             return .{ .enum_record = try self.descriptor() };
         }
 
@@ -874,7 +875,7 @@ pub fn enumSerializerFromStatic(comptime T: type, comptime get_adapter: *const f
             return get_adapter().decode(allocator, input, keep_unrecognized);
         }
 
-        pub fn typeDescriptor(_: @This()) s.TypeDescriptor {
+        pub fn typeDescriptor(_: @This()) td.TypeDescriptor {
             return get_adapter().typeDescriptor() catch unreachable;
         }
     };
