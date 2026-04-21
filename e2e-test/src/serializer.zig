@@ -32,6 +32,7 @@ pub const SerializeFormat = enum {
 pub fn Serializer(comptime T: type) type {
     return struct {
         const Self = @This();
+        pub const Value = T;
 
         // Each concrete adapter is a zero-size struct, so all behaviour is
         // comptime-constant. The vtable holds plain function pointers with no

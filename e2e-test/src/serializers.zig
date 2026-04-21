@@ -836,7 +836,8 @@ pub const BytesAdapter = struct {
 ///
 /// `None` encodes as JSON `null` / wire byte `0xFF`.
 /// `Some(v)` delegates to `inner` for both JSON and binary encoding.
-pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(?T) {
+pub fn optionalSerializer(comptime inner: anytype) Serializer(?@TypeOf(inner).Value) {
+    const T = @TypeOf(inner).Value;
     const ivt = inner._vtable;
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: ?T) bool {
@@ -970,7 +971,8 @@ pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serial
 /// Readable JSON: `[\n  v1,\n  v2\n]`
 /// Wire:  0 items → 0xF6; 1–3 items → 0xF7–0xF9 (no length);
 ///        4+ items → 0xFA + encodeUint32(count).
-pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializer([]const T) {
+pub fn arraySerializer(comptime inner: anytype) Serializer([]const @TypeOf(inner).Value) {
+    const T = @TypeOf(inner).Value;
     const ivt = inner._vtable;
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: []const T) bool {
@@ -1047,7 +1049,7 @@ pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializ
 
 /// Returns a serializer for keyed arrays (`KeyedArray(Spec)`).
 ///
-/// Serialization matches `arraySerializer(Spec.Value, inner)`, while preserving
+/// Serialization matches `arraySerializer(inner)`, while preserving
 /// keyed lookup behavior on the deserialized container.
 pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec.Value)) Serializer(KeyedArray(Spec)) {
     const Value = Spec.Value;
@@ -1695,54 +1697,54 @@ test "timestampSerializer: typeDescriptor is primitive timestamp" {
 
 test "optionalSerializer: serialize dense none is null" {
     const alloc = std.testing.allocator;
-    const out = try optionalSerializer(i32, int32Serializer()).serialize(alloc, null, .{});
+    const out = try optionalSerializer(int32Serializer()).serialize(alloc, null, .{});
     defer alloc.free(out);
     try std.testing.expectEqualStrings("null", out);
 }
 
 test "optionalSerializer: serialize dense some delegates" {
     const alloc = std.testing.allocator;
-    const out = try optionalSerializer(i32, int32Serializer()).serialize(alloc, @as(?i32, 42), .{});
+    const out = try optionalSerializer(int32Serializer()).serialize(alloc, @as(?i32, 42), .{});
     defer alloc.free(out);
     try std.testing.expectEqualStrings("42", out);
 }
 
 test "optionalSerializer: serialize readable none is null" {
     const alloc = std.testing.allocator;
-    const out = try optionalSerializer(i32, int32Serializer()).serialize(alloc, null, .{ .format = .readableJson });
+    const out = try optionalSerializer(int32Serializer()).serialize(alloc, null, .{ .format = .readableJson });
     defer alloc.free(out);
     try std.testing.expectEqualStrings("null", out);
 }
 
 test "optionalSerializer: serialize readable some delegates" {
     const alloc = std.testing.allocator;
-    const out = try optionalSerializer(i32, int32Serializer()).serialize(alloc, @as(?i32, 42), .{ .format = .readableJson });
+    const out = try optionalSerializer(int32Serializer()).serialize(alloc, @as(?i32, 42), .{ .format = .readableJson });
     defer alloc.free(out);
     try std.testing.expectEqualStrings("42", out);
 }
 
 test "optionalSerializer: deserialize null is none" {
     const alloc = std.testing.allocator;
-    const v = try optionalSerializer(i32, int32Serializer()).deserialize(alloc, "null", .{});
+    const v = try optionalSerializer(int32Serializer()).deserialize(alloc, "null", .{});
     try std.testing.expectEqual(@as(?i32, null), v);
 }
 
 test "optionalSerializer: deserialize value is some" {
     const alloc = std.testing.allocator;
-    const v = try optionalSerializer(i32, int32Serializer()).deserialize(alloc, "7", .{});
+    const v = try optionalSerializer(int32Serializer()).deserialize(alloc, "7", .{});
     try std.testing.expectEqual(@as(?i32, 7), v);
 }
 
 test "optionalSerializer: binary none is wire 255" {
     const alloc = std.testing.allocator;
-    const bytes = try optionalSerializer(i32, int32Serializer()).serialize(alloc, null, .{ .format = .binary });
+    const bytes = try optionalSerializer(int32Serializer()).serialize(alloc, null, .{ .format = .binary });
     defer alloc.free(bytes);
     try std.testing.expectEqualSlices(u8, "skir\xff", bytes);
 }
 
 test "optionalSerializer: binary some delegates" {
     const alloc = std.testing.allocator;
-    const bytes = try optionalSerializer(i32, int32Serializer()).serialize(alloc, @as(?i32, 5), .{ .format = .binary });
+    const bytes = try optionalSerializer(int32Serializer()).serialize(alloc, @as(?i32, 5), .{ .format = .binary });
     defer alloc.free(bytes);
     // Some(5): int32 encodes 5 as a single wire byte 5.
     try std.testing.expectEqualSlices(u8, "skir\x05", bytes);
@@ -1750,7 +1752,7 @@ test "optionalSerializer: binary some delegates" {
 
 test "optionalSerializer: binary round-trip" {
     const alloc = std.testing.allocator;
-    const s = optionalSerializer(i32, int32Serializer());
+    const s = optionalSerializer(int32Serializer());
     for ([_]?i32{ null, 0, 42, -1 }) |v| {
         const bytes = try s.serialize(alloc, v, .{ .format = .binary });
         defer alloc.free(bytes);
@@ -1760,7 +1762,7 @@ test "optionalSerializer: binary round-trip" {
 }
 
 test "optionalSerializer: typeDescriptor is optional of int32" {
-    const td = try optionalSerializer(i32, int32Serializer()).typeDescriptor(std.heap.page_allocator);
+    const td = try optionalSerializer(int32Serializer()).typeDescriptor(std.heap.page_allocator);
     try std.testing.expect(td == .optional);
     try std.testing.expectEqual(PrimitiveType.Int32, td.optional.primitive);
 }
@@ -1771,7 +1773,7 @@ test "optionalSerializer: typeDescriptor is optional of int32" {
 
 test "arraySerializer: serialize dense empty" {
     const alloc = std.testing.allocator;
-    const out = try arraySerializer(i32, int32Serializer()).serialize(alloc, &.{}, .{});
+    const out = try arraySerializer(int32Serializer()).serialize(alloc, &.{}, .{});
     defer alloc.free(out);
     try std.testing.expectEqualStrings("[]", out);
 }
@@ -1779,14 +1781,14 @@ test "arraySerializer: serialize dense empty" {
 test "arraySerializer: serialize dense nonempty" {
     const alloc = std.testing.allocator;
     const items = [_]i32{ 1, 2, 3 };
-    const out = try arraySerializer(i32, int32Serializer()).serialize(alloc, &items, .{});
+    const out = try arraySerializer(int32Serializer()).serialize(alloc, &items, .{});
     defer alloc.free(out);
     try std.testing.expectEqualStrings("[1,2,3]", out);
 }
 
 test "arraySerializer: serialize readable empty" {
     const alloc = std.testing.allocator;
-    const out = try arraySerializer(i32, int32Serializer()).serialize(alloc, &.{}, .{ .format = .readableJson });
+    const out = try arraySerializer(int32Serializer()).serialize(alloc, &.{}, .{ .format = .readableJson });
     defer alloc.free(out);
     try std.testing.expectEqualStrings("[]", out);
 }
@@ -1794,28 +1796,28 @@ test "arraySerializer: serialize readable empty" {
 test "arraySerializer: serialize readable nonempty" {
     const alloc = std.testing.allocator;
     const items = [_]i32{ 1, 2 };
-    const out = try arraySerializer(i32, int32Serializer()).serialize(alloc, &items, .{ .format = .readableJson });
+    const out = try arraySerializer(int32Serializer()).serialize(alloc, &items, .{ .format = .readableJson });
     defer alloc.free(out);
     try std.testing.expectEqualStrings("[\n  1,\n  2\n]", out);
 }
 
 test "arraySerializer: deserialize array" {
     const alloc = std.testing.allocator;
-    const result = try arraySerializer(i32, int32Serializer()).deserialize(alloc, "[10,20,30]", .{});
+    const result = try arraySerializer(int32Serializer()).deserialize(alloc, "[10,20,30]", .{});
     defer alloc.free(result);
     try std.testing.expectEqualSlices(i32, &.{ 10, 20, 30 }, result);
 }
 
 test "arraySerializer: deserialize null is empty" {
     const alloc = std.testing.allocator;
-    const result = try arraySerializer(i32, int32Serializer()).deserialize(alloc, "null", .{});
+    const result = try arraySerializer(int32Serializer()).deserialize(alloc, "null", .{});
     defer alloc.free(result);
     try std.testing.expectEqualSlices(i32, &.{}, result);
 }
 
 test "arraySerializer: binary empty is wire 246" {
     const alloc = std.testing.allocator;
-    const bytes = try arraySerializer(i32, int32Serializer()).serialize(alloc, &.{}, .{ .format = .binary });
+    const bytes = try arraySerializer(int32Serializer()).serialize(alloc, &.{}, .{ .format = .binary });
     defer alloc.free(bytes);
     try std.testing.expectEqualSlices(u8, "skir\xf6", bytes);
 }
@@ -1823,7 +1825,7 @@ test "arraySerializer: binary empty is wire 246" {
 test "arraySerializer: binary nonempty wire byte" {
     const alloc = std.testing.allocator;
     const items = [_]i32{ 1, 2, 3 };
-    const bytes = try arraySerializer(i32, int32Serializer()).serialize(alloc, &items, .{ .format = .binary });
+    const bytes = try arraySerializer(int32Serializer()).serialize(alloc, &items, .{ .format = .binary });
     defer alloc.free(bytes);
     // 3 items → wire 249 (246 + 3), then each int32 as single byte
     try std.testing.expectEqualSlices(u8, "skir\xf9\x01\x02\x03", bytes);
@@ -1831,7 +1833,7 @@ test "arraySerializer: binary nonempty wire byte" {
 
 test "arraySerializer: binary round-trip" {
     const alloc = std.testing.allocator;
-    const s = arraySerializer(i32, int32Serializer());
+    const s = arraySerializer(int32Serializer());
     const cases = [_][]const i32{ &.{}, &.{0}, &.{ 1, 2, 3 }, &.{ -1, 0, 1 } };
     for (cases) |v| {
         const bytes = try s.serialize(alloc, v, .{ .format = .binary });
@@ -1843,7 +1845,7 @@ test "arraySerializer: binary round-trip" {
 }
 
 test "arraySerializer: typeDescriptor is array of int32" {
-    const td = try arraySerializer(i32, int32Serializer()).typeDescriptor(std.heap.page_allocator);
+    const td = try arraySerializer(int32Serializer()).typeDescriptor(std.heap.page_allocator);
     try std.testing.expect(td == .array);
     try std.testing.expectEqual(PrimitiveType.Int32, td.array.item_type.primitive);
 }

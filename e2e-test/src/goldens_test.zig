@@ -201,8 +201,8 @@ fn typedValueToDenseJson(tv: *const goldens.TypedValue, allocator: std.mem.Alloc
         .Timestamp => |v| try skir_client.timestampSerializer().serialize(allocator, v, .{ .format = .denseJson }),
         .String => |v| try skir_client.stringSerializer().serialize(allocator, v, .{ .format = .denseJson }),
         .Bytes => |v| try skir_client.bytesSerializer().serialize(allocator, v, .{ .format = .denseJson }),
-        .BoolOptional => |v| try skir_client.optionalSerializer(bool, skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .denseJson }),
-        .Ints => |v| try skir_client.arraySerializer(i32, skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .denseJson }),
+        .BoolOptional => |v| try skir_client.optionalSerializer(skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .denseJson }),
+        .Ints => |v| try skir_client.arraySerializer(skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .denseJson }),
         .Point => |v| try goldens.Point.serializer().serialize(allocator, v, .{ .format = .denseJson }),
         .Color => |v| try goldens.Color.serializer().serialize(allocator, v, .{ .format = .denseJson }),
         .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v, .{ .format = .denseJson }),
@@ -226,8 +226,8 @@ fn typedValueToReadableJson(tv: *const goldens.TypedValue, allocator: std.mem.Al
         .Timestamp => |v| try skir_client.timestampSerializer().serialize(allocator, v, .{ .format = .readableJson }),
         .String => |v| try skir_client.stringSerializer().serialize(allocator, v, .{ .format = .readableJson }),
         .Bytes => |v| try skir_client.bytesSerializer().serialize(allocator, v, .{ .format = .readableJson }),
-        .BoolOptional => |v| try skir_client.optionalSerializer(bool, skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .readableJson }),
-        .Ints => |v| try skir_client.arraySerializer(i32, skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .readableJson }),
+        .BoolOptional => |v| try skir_client.optionalSerializer(skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .readableJson }),
+        .Ints => |v| try skir_client.arraySerializer(skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .readableJson }),
         .Point => |v| try goldens.Point.serializer().serialize(allocator, v, .{ .format = .readableJson }),
         .Color => |v| try goldens.Color.serializer().serialize(allocator, v, .{ .format = .readableJson }),
         .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v, .{ .format = .readableJson }),
@@ -251,8 +251,8 @@ fn typedValueToBytes(tv: *const goldens.TypedValue, allocator: std.mem.Allocator
         .Timestamp => |v| try skir_client.timestampSerializer().serialize(allocator, v, .{ .format = .binary }),
         .String => |v| try skir_client.stringSerializer().serialize(allocator, v, .{ .format = .binary }),
         .Bytes => |v| try skir_client.bytesSerializer().serialize(allocator, v, .{ .format = .binary }),
-        .BoolOptional => |v| try skir_client.optionalSerializer(bool, skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .binary }),
-        .Ints => |v| try skir_client.arraySerializer(i32, skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .binary }),
+        .BoolOptional => |v| try skir_client.optionalSerializer(skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .binary }),
+        .Ints => |v| try skir_client.arraySerializer(skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .binary }),
         .Point => |v| try goldens.Point.serializer().serialize(allocator, v, .{ .format = .binary }),
         .Color => |v| try goldens.Color.serializer().serialize(allocator, v, .{ .format = .binary }),
         .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v, .{ .format = .binary }),
@@ -281,8 +281,8 @@ fn typedValueFromJson(
         .Timestamp => .{ .Timestamp = try skir_client.timestampSerializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .String => .{ .String = try skir_client.stringSerializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Bytes => .{ .Bytes = try skir_client.bytesSerializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .BoolOptional => .{ .BoolOptional = try skir_client.optionalSerializer(bool, skir_client.boolSerializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .Ints => .{ .Ints = try skir_client.arraySerializer(i32, skir_client.int32Serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .BoolOptional => .{ .BoolOptional = try skir_client.optionalSerializer(skir_client.boolSerializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .Ints => .{ .Ints = try skir_client.arraySerializer(skir_client.int32Serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Point => .{ .Point = try goldens.Point.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Color => .{ .Color = try goldens.Color.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .MyEnum => .{ .MyEnum = try goldens.MyEnum.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
@@ -311,8 +311,8 @@ fn typedValueFromBytes(
         .Timestamp => .{ .Timestamp = try skir_client.timestampSerializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .String => .{ .String = try skir_client.stringSerializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Bytes => .{ .Bytes = try skir_client.bytesSerializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .BoolOptional => .{ .BoolOptional = try skir_client.optionalSerializer(bool, skir_client.boolSerializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .Ints => .{ .Ints = try skir_client.arraySerializer(i32, skir_client.int32Serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .BoolOptional => .{ .BoolOptional = try skir_client.optionalSerializer(skir_client.boolSerializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .Ints => .{ .Ints = try skir_client.arraySerializer(skir_client.int32Serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Point => .{ .Point = try goldens.Point.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Color => .{ .Color = try goldens.Color.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .MyEnum => .{ .MyEnum = try goldens.MyEnum.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
@@ -336,8 +336,8 @@ fn typedValueTypeDescriptorJson(tv: *const goldens.TypedValue, allocator: std.me
         .Timestamp => try skir_client.timestampSerializer().typeDescriptor(allocator),
         .String => try skir_client.stringSerializer().typeDescriptor(allocator),
         .Bytes => try skir_client.bytesSerializer().typeDescriptor(allocator),
-        .BoolOptional => try skir_client.optionalSerializer(bool, skir_client.boolSerializer()).typeDescriptor(allocator),
-        .Ints => try skir_client.arraySerializer(i32, skir_client.int32Serializer()).typeDescriptor(allocator),
+        .BoolOptional => try skir_client.optionalSerializer(skir_client.boolSerializer()).typeDescriptor(allocator),
+        .Ints => try skir_client.arraySerializer(skir_client.int32Serializer()).typeDescriptor(allocator),
         .Point => try goldens.Point.serializer().typeDescriptor(allocator),
         .Color => try goldens.Color.serializer().typeDescriptor(allocator),
         .MyEnum => try goldens.MyEnum.serializer().typeDescriptor(allocator),
@@ -429,7 +429,7 @@ fn verifyReserializeLargeArray(input: *const goldens.Assertion.ReserializeLargeA
     const values = try allocator.alloc(i32, n);
     for (values) |*v| v.* = 1;
 
-    const ser = skir_client.arraySerializer(i32, skir_client.int32Serializer());
+    const ser = skir_client.arraySerializer(skir_client.int32Serializer());
 
     const dense_json = try ser.serialize(allocator, values, .{ .format = .denseJson });
     const dense_round_trip = try ser.deserialize(allocator, dense_json, .{ .keepUnrecognizedValues = false });

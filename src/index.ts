@@ -1,7 +1,6 @@
-// TODO: arraySerializer(i32, int32Serializer()) -> arraySerializer(int32Serializer) -- if I just add a const type T to serializer?
 // TODO: add tempo conversion method to timestamp.zig
-// TODO: formatting, better end of lines, use the format thing to not worry about indent.
 // TODO: optimzie things?
+// TODO: look at what happens with recursive type where T owns a T?
 // TODO: run test with config=asan...
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
 // TODO: do not expose the adapter, only expose the serializer?
@@ -555,7 +554,7 @@ class ZigSourceFileGenerator {
       case "primitive":
         return this.getPrimitiveSerializerExpr(type.primitive);
       case "optional":
-        return `skir_client.optionalSerializer(${this.typeSpeller.getZigType(type.other)}, ${this.getSerializerExpr(type.other, options)})`;
+        return `skir_client.optionalSerializer(${this.getSerializerExpr(type.other, options)})`;
       case "array": {
         const inner = this.getSerializerExpr(type.item, options);
         if (type.key) {
@@ -567,7 +566,7 @@ class ZigSourceFileGenerator {
             return `skir_client.keyedArraySerializer(${spec.specRef}, ${inner})`;
           }
         }
-        return `skir_client.arraySerializer(${this.typeSpeller.getZigType(type.item)}, ${inner})`;
+        return `skir_client.arraySerializer(${inner})`;
       }
       case "record": {
         const typeName = this.typeSpeller.getZigType(type);
