@@ -1,6 +1,7 @@
-// TODO: optimzie things?
-// TODO: name conflict between generated variant names and subtypes, or even Kind...
-// TODO: do not expose the adapter, only expose the serializer?
+// TODO: think about what to expose... use internal as much as possible
+// TODO: story around recursive?
+// TODO: comments
+// TODO: Service and ServiceClient
 import {
   unquoteAndUnescape,
   type CodeGenerator,
@@ -264,7 +265,7 @@ class ZigSourceFileGenerator {
 
     this.push(`\n`);
     this.push(
-      `pub const default: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n`,
+      `pub const unknown: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n`,
     );
 
     if (emitKindEnum) {

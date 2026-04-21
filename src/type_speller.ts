@@ -58,8 +58,12 @@ export class TypeSpeller {
     options: { keyedSpecName?: string } = {},
   ): string {
     switch (type.kind) {
-      case "record":
-        return `${this.getZigType(type)}.default`;
+      case "record": {
+        const recordLocation = this.recordMap.get(type.key)!;
+        const defaultMember =
+          recordLocation.record.recordType === "enum" ? "unknown" : "default";
+        return `${this.getZigType(type)}.${defaultMember}`;
+      }
       case "array": {
         const keyedSpecName =
           options.keyedSpecName ??

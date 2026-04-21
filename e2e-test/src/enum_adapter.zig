@@ -254,7 +254,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 }
 
                 fn constant(_: *const anyopaque) T {
-                    return T.default;
+                    return T.unknown;
                 }
 
                 fn toJson(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator, input: *const T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -543,10 +543,10 @@ pub fn EnumAdapter(comptime T: type) type {
                             }
                         }
                     }
-                    break :blk T.default;
+                    break :blk T.unknown;
                 },
                 .array => |arr| blk: {
-                    if (arr.items.len != 2) break :blk T.default;
+                    if (arr.items.len != 2) break :blk T.unknown;
                     const number: i32 = switch (arr.items[0]) {
                         .integer => |n| @intCast(n),
                         .float => |f| @intFromFloat(@round(f)),
@@ -555,11 +555,11 @@ pub fn EnumAdapter(comptime T: type) type {
                     break :blk try self.fromNumberAndPayload(allocator, number, arr.items[1], keep_unrecognized);
                 },
                 .object => |obj| blk: {
-                    const kind_val = obj.get("kind") orelse break :blk T.default;
+                    const kind_val = obj.get("kind") orelse break :blk T.unknown;
                     const payload = obj.get("value") orelse std.json.Value{ .null = {} };
                     const kind_name = switch (kind_val) {
                         .string => |s_name| s_name,
-                        else => break :blk T.default,
+                        else => break :blk T.unknown,
                     };
                     if (self.name_to_kind_ordinal.get(kind_name)) |ko| {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
@@ -571,9 +571,9 @@ pub fn EnumAdapter(comptime T: type) type {
                             }
                         }
                     }
-                    break :blk T.default;
+                    break :blk T.unknown;
                 },
-                else => T.default,
+                else => T.unknown,
             };
         }
 
@@ -583,14 +583,14 @@ pub fn EnumAdapter(comptime T: type) type {
                     .removed => if (keep_unrecognized)
                         self.wrap_unrecognized(.{ .number = number, .from_wire = false })
                     else
-                        T.default,
+                        T.unknown,
                     .constant => |ko| blk: {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
                             if (self.kind_ordinal_to_entry.items[ko]) |entry| {
                                 break :blk entry.constant_fn(entry.ctx);
                             }
                         }
-                        break :blk T.default;
+                        break :blk T.unknown;
                     },
                     .wrapper => |ko| blk: {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
@@ -598,7 +598,7 @@ pub fn EnumAdapter(comptime T: type) type {
                                 break :blk try entry.wrap_from_json_fn(entry.ctx, allocator, payload, keep_unrecognized);
                             }
                         }
-                        break :blk T.default;
+                        break :blk T.unknown;
                     },
                 };
             }
@@ -607,7 +607,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 const payload_json = try std.json.Stringify.valueAlloc(allocator, payload, .{});
                 return self.wrap_unrecognized(.{ .number = number, .from_wire = false, .payload_json = payload_json, .payload_wire = null });
             }
-            return T.default;
+            return T.unknown;
         }
 
         fn resolveConstantLookup(self: *const Self, number: i32, keep_unrecognized: bool, from_wire: bool) T {
@@ -616,14 +616,14 @@ pub fn EnumAdapter(comptime T: type) type {
                     .removed => if (keep_unrecognized)
                         self.wrap_unrecognized(.{ .number = number, .from_wire = from_wire })
                     else
-                        T.default,
+                        T.unknown,
                     .constant => |ko| blk: {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
                             if (self.kind_ordinal_to_entry.items[ko]) |entry| {
                                 break :blk entry.constant_fn(entry.ctx);
                             }
                         }
-                        break :blk T.default;
+                        break :blk T.unknown;
                     },
                     .wrapper => |ko| blk: {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
@@ -634,7 +634,7 @@ pub fn EnumAdapter(comptime T: type) type {
                                 }
                             }
                         }
-                        break :blk T.default;
+                        break :blk T.unknown;
                     },
                 };
             }
@@ -642,7 +642,7 @@ pub fn EnumAdapter(comptime T: type) type {
             if (keep_unrecognized) {
                 return self.wrap_unrecognized(.{ .number = number, .from_wire = from_wire });
             }
-            return T.default;
+            return T.unknown;
         }
 
         fn encodeI64Compat(v: i64, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
@@ -800,7 +800,7 @@ pub fn EnumAdapter(comptime T: type) type {
             else if (wire >= 251 and wire <= 254)
                 @as(i32, wire) - 250
             else
-                return T.default;
+                return T.unknown;
 
             if (self.number_to_entry.get(wrapper_number)) |any| {
                 return switch (any) {
@@ -811,11 +811,11 @@ pub fn EnumAdapter(comptime T: type) type {
                             }
                         }
                         try skipValue(input);
-                        break :blk T.default;
+                        break :blk T.unknown;
                     },
                     .removed => blk: {
                         try skipValue(input);
-                        break :blk T.default;
+                        break :blk T.unknown;
                     },
                     .constant => |ko| blk: {
                         try skipValue(input);
@@ -824,7 +824,7 @@ pub fn EnumAdapter(comptime T: type) type {
                                 break :blk entry.constant_fn(entry.ctx);
                             }
                         }
-                        break :blk T.default;
+                        break :blk T.unknown;
                     },
                 };
             }
@@ -837,7 +837,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 return self.wrap_unrecognized(.{ .number = wrapper_number, .from_wire = true, .payload_json = null, .payload_wire = payload_wire });
             }
             try skipValue(input);
-            return T.default;
+            return T.unknown;
         }
 
         pub fn typeDescriptor(self: *const Self) anyerror!td.TypeDescriptor {
