@@ -174,9 +174,6 @@ class ZigSourceFileGenerator {
       this.push("\n");
     }
 
-    this.push(
-      `const _SerializerInitState = enum { uninitialized, initializing, initialized };\n`,
-    );
     this.push(`var _serializer_init_mutex: std.Thread.Mutex = .{};\n\n`);
   }
 
@@ -335,16 +332,13 @@ class ZigSourceFileGenerator {
     this.push(`fn _adapter() *skir_client.StructAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
     this.push(`const Holder = struct {\n`);
-    this.push(`var state: _SerializerInitState = .uninitialized;\n`);
+    this.push(`var state: u8 = 0;\n`);
     this.push(`var adapter: skir_client.StructAdapter(S) = undefined;\n`);
     this.push(`};\n`);
     this.push(`_serializer_init_mutex.lock();\n`);
     this.push(`defer _serializer_init_mutex.unlock();\n`);
-    this.push(`switch (Holder.state) {\n`);
-    this.push(`.initialized, .initializing => return &Holder.adapter,\n`);
-    this.push(`.uninitialized => {},\n`);
-    this.push(`}\n`);
-    this.push(`Holder.state = .initializing;\n`);
+    this.push(`if (Holder.state != 0) return &Holder.adapter;\n`);
+    this.push(`Holder.state = 1;\n`);
     this.push(`Holder.adapter = skir_client.StructAdapter(S).init(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
@@ -406,7 +400,7 @@ class ZigSourceFileGenerator {
     }
 
     this.push(`Holder.adapter.finalize() catch unreachable;\n`);
-    this.push(`Holder.state = .initialized;\n`);
+    this.push(`Holder.state = 2;\n`);
     this.push(`return &Holder.adapter;\n`);
     this.push(`}\n`);
 
@@ -433,16 +427,13 @@ class ZigSourceFileGenerator {
     this.push(`fn _adapter() *skir_client.EnumAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
     this.push(`const Holder = struct {\n`);
-    this.push(`var state: _SerializerInitState = .uninitialized;\n`);
+    this.push(`var state: u8 = 0;\n`);
     this.push(`var adapter: skir_client.EnumAdapter(S) = undefined;\n`);
     this.push(`};\n`);
     this.push(`_serializer_init_mutex.lock();\n`);
     this.push(`defer _serializer_init_mutex.unlock();\n`);
-    this.push(`switch (Holder.state) {\n`);
-    this.push(`.initialized, .initializing => return &Holder.adapter,\n`);
-    this.push(`.uninitialized => {},\n`);
-    this.push(`}\n`);
-    this.push(`Holder.state = .initializing;\n`);
+    this.push(`if (Holder.state != 0) return &Holder.adapter;\n`);
+    this.push(`Holder.state = 1;\n`);
     this.push(`Holder.adapter = skir_client.EnumAdapter(S).init(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
@@ -523,7 +514,7 @@ class ZigSourceFileGenerator {
     }
 
     this.push(`Holder.adapter.finalize() catch unreachable;\n`);
-    this.push(`Holder.state = .initialized;\n`);
+    this.push(`Holder.state = 2;\n`);
     this.push(`return &Holder.adapter;\n`);
     this.push(`}\n`);
 
