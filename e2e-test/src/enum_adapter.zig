@@ -50,8 +50,8 @@ pub fn EnumAdapter(comptime T: type) type {
         doc: []const u8,
 
         get_kind_ordinal: *const fn (*const T) usize,
-        wrap_unrecognized: *const fn (unrecognized.UnrecognizedVariant) T,
-        get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedVariant,
+        wrap_unrecognized: *const fn (unrecognized.UnrecognizedVariant(T)) T,
+        get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedVariant(T),
 
         number_to_entry: std.AutoHashMap(i32, AnyEntry),
         removed_numbers: std.ArrayList(i32),
@@ -66,8 +66,8 @@ pub fn EnumAdapter(comptime T: type) type {
             qualified_name: []const u8,
             doc: []const u8,
             get_kind_ordinal: *const fn (*const T) usize,
-            wrap_unrecognized: *const fn (unrecognized.UnrecognizedVariant) T,
-            get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedVariant,
+            wrap_unrecognized: *const fn (unrecognized.UnrecognizedVariant(T)) T,
+            get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedVariant(T),
         ) !Self {
             var kind_entries: std.ArrayList(?VariantEntry) = .empty;
             try kind_entries.append(allocator, null); // kind ordinal 0 = UNKNOWN pseudo-entry

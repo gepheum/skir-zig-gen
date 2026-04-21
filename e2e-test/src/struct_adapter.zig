@@ -41,8 +41,8 @@ pub fn StructAdapter(comptime T: type) type {
         module_path: []const u8,
         qualified_name: []const u8,
         doc: []const u8,
-        get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedFields,
-        set_unrecognized: *const fn (*T, ?unrecognized.UnrecognizedFields) void,
+        get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedFields(T),
+        set_unrecognized: *const fn (*T, ?unrecognized.UnrecognizedFields(T)) void,
 
         ordered_entries: std.ArrayList(FieldEntry),
         name_to_index: std.StringHashMap(usize),
@@ -56,8 +56,8 @@ pub fn StructAdapter(comptime T: type) type {
             module_path: []const u8,
             qualified_name: []const u8,
             doc: []const u8,
-            get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedFields,
-            set_unrecognized: *const fn (*T, ?unrecognized.UnrecognizedFields) void,
+            get_unrecognized: *const fn (*const T) ?unrecognized.UnrecognizedFields(T),
+            set_unrecognized: *const fn (*T, ?unrecognized.UnrecognizedFields(T)) void,
         ) !Self {
             return .{
                 .allocator = allocator,

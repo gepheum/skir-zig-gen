@@ -1,7 +1,6 @@
-// TODO: make unrecognized_fields generic
+// TODO: typeDescriptorFn should expect an allocator... The structure of Serializer makes no sense...
 // TODO: add tempo conversion method to timestamp.zig
 // TODO: formatting, better end of lines, use the format thing to not worry about indent.
-// TODO: typeDescriptorFn should expect an allocator...
 // TODO: optimzie things?
 // TODO: run test with config=asan...
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
@@ -199,7 +198,9 @@ class ZigSourceFileGenerator {
       this.writeStructField(field);
     }
 
-    this.push(`_unrecognized: ?skir_client.UnrecognizedFields = null,\n`);
+    this.push(
+      `_unrecognized: ?skir_client.UnrecognizedFields(@This()) = null,\n`,
+    );
     this.push(`pub const default: @This() = .{\n`);
     for (const field of loc.record.fields) {
       if (field.isRecursive !== false) {
@@ -275,7 +276,7 @@ class ZigSourceFileGenerator {
     }
 
     this.push(
-      `${GENERATED_UNKNOWN_VARIANT_NAME}: skir_client.UnrecognizedVariant,\n`,
+      `${GENERATED_UNKNOWN_VARIANT_NAME}: skir_client.UnrecognizedVariant(@This()),\n`,
     );
     for (const variant of loc.record.fields) {
       this.push(commentify(docToCommentText(variant.doc)));
@@ -349,10 +350,10 @@ class ZigSourceFileGenerator {
     this.push(`${toZigStringLiteral(qualifiedName)},\n`);
     this.push(`${toZigStringLiteral(docToCommentText(loc.record.doc))},\n`);
     this.push(
-      `struct { fn get(x: *const S) ?skir_client.UnrecognizedFields { return x._unrecognized; } }.get,\n`,
+      `struct { fn get(x: *const S) ?skir_client.UnrecognizedFields(S) { return x._unrecognized; } }.get,\n`,
     );
     this.push(
-      `struct { fn set(x: *S, u: ?skir_client.UnrecognizedFields) void { x._unrecognized = u; } }.set,\n`,
+      `struct { fn set(x: *S, u: ?skir_client.UnrecognizedFields(S)) void { x._unrecognized = u; } }.set,\n`,
     );
     this.push(`) catch unreachable;\n`);
 
@@ -459,11 +460,11 @@ class ZigSourceFileGenerator {
     this.push(`}\n`);
     this.push(`}.getKindOrdinal,\n`);
     this.push(
-      `struct { fn wrapUnknown(u: skir_client.UnrecognizedVariant) S { return .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = u }; } }.wrapUnknown,\n`,
+      `struct { fn wrapUnknown(u: skir_client.UnrecognizedVariant(S)) S { return .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = u }; } }.wrapUnknown,\n`,
     );
     this.push(`struct {\n`);
     this.push(
-      `fn getUnknown(x: *const S) ?skir_client.UnrecognizedVariant {\n`,
+      `fn getUnknown(x: *const S) ?skir_client.UnrecognizedVariant(S) {\n`,
     );
     this.push(`return switch (x.*) {\n`);
     this.push(`.${GENERATED_UNKNOWN_VARIANT_NAME} => |u| u,\n`);
