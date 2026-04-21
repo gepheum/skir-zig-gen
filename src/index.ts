@@ -1,11 +1,9 @@
-// TODO: typeDescriptorFn should expect an allocator... The structure of Serializer makes no sense...
 // TODO: arraySerializer(i32, int32Serializer()) -> arraySerializer(int32Serializer) -- if I just add a const type T to serializer?
 // TODO: add tempo conversion method to timestamp.zig
 // TODO: formatting, better end of lines, use the format thing to not worry about indent.
 // TODO: optimzie things?
 // TODO: run test with config=asan...
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
-// TODO: deduplicate serializer... defined both in serializers and serializer
 // TODO: do not expose the adapter, only expose the serializer?
 import {
   unquoteAndUnescape,
@@ -185,6 +183,7 @@ class ZigSourceFileGenerator {
       this.typeSpeller,
     );
 
+    this.push(`\n`);
     this.push(commentify(docToCommentText(loc.record.doc)));
     this.push(`pub const ${typeName} = struct {\n`);
 
@@ -243,39 +242,12 @@ class ZigSourceFileGenerator {
     const children = this.childrenOf.get(loc.record) ?? [];
     const emitKindEnum = this.keyedArrayContext.isEnumUsedAsKey(loc.record);
 
+    this.push(`\n`);
     this.push(commentify(docToCommentText(loc.record.doc)));
     this.push(`pub const ${typeName} = union(enum) {\n`);
 
     for (const child of children) {
       this.writeRecord(child);
-    }
-
-    if (emitKindEnum) {
-      this.push(`pub const Kind = enum {\n`);
-      this.push(`${GENERATED_UNKNOWN_VARIANT_NAME},\n`);
-      for (const variant of loc.record.fields) {
-        this.push(`${toVariantName(variant.name.text)},\n`);
-      }
-      this.push(`};\n`);
-    }
-
-    this.push(`\n`);
-    this.push(
-      `pub const default: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n`,
-    );
-    if (emitKindEnum) {
-      this.push(`\n`);
-      this.push(`pub fn kind(self: @This()) Kind {\n`);
-      this.push(`return switch (self) {\n`);
-      this.push(
-        `.${GENERATED_UNKNOWN_VARIANT_NAME} => .${GENERATED_UNKNOWN_VARIANT_NAME},\n`,
-      );
-      for (const variant of loc.record.fields) {
-        const variantName = toVariantName(variant.name.text);
-        this.push(`.${variantName} => .${variantName},\n`);
-      }
-      this.push(`};\n`);
-      this.push(`}\n`);
     }
 
     this.push(
@@ -292,6 +264,34 @@ class ZigSourceFileGenerator {
       } else {
         this.push(`${toVariantName(variant.name.text)},\n`);
       }
+    }
+
+    this.push(`\n`);
+    this.push(
+      `pub const default: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n`,
+    );
+
+    if (emitKindEnum) {
+      this.push(`\n`);
+      this.push(`pub const Kind = enum {\n`);
+      this.push(`${GENERATED_UNKNOWN_VARIANT_NAME},\n`);
+      for (const variant of loc.record.fields) {
+        this.push(`${toVariantName(variant.name.text)},\n`);
+      }
+      this.push(`};\n`);
+
+      this.push(`\n`);
+      this.push(`pub fn kind(self: @This()) Kind {\n`);
+      this.push(`return switch (self) {\n`);
+      this.push(
+        `.${GENERATED_UNKNOWN_VARIANT_NAME} => .${GENERATED_UNKNOWN_VARIANT_NAME},\n`,
+      );
+      for (const variant of loc.record.fields) {
+        const variantName = toVariantName(variant.name.text);
+        this.push(`.${variantName} => .${variantName},\n`);
+      }
+      this.push(`};\n`);
+      this.push(`}\n`);
     }
 
     this.push(`\n`);
