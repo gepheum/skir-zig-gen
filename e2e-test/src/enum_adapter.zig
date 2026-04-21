@@ -57,6 +57,7 @@ pub fn EnumAdapter(comptime T: type) type {
         name_to_kind_ordinal: std.StringHashMap(usize),
         kind_ordinal_to_entry: std.ArrayList(?VariantEntry),
         desc_variants: std.ArrayList(s.EnumVariant),
+        descriptor_in_progress: bool,
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -83,6 +84,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 .name_to_kind_ordinal = std.StringHashMap(usize).init(allocator),
                 .kind_ordinal_to_entry = kind_entries,
                 .desc_variants = .empty,
+                .descriptor_in_progress = false,
             };
         }
 
@@ -304,8 +306,10 @@ pub fn EnumAdapter(comptime T: type) type {
                     return ctx.wrap(inner);
                 }
 
-                fn wrapDefault(_: *const anyopaque) ?T {
-                    return null;
+                fn wrapDefault(ctx_ptr: *const anyopaque) ?T {
+                    const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
+                    const inner = ctx.ser._vtable.fromJsonFn(std.heap.page_allocator, .{ .null = {} }, false) catch return null;
+                    return ctx.wrap(inner);
                 }
 
                 fn variantType(ctx_ptr: *const anyopaque) ?s.TypeDescriptor {
@@ -390,6 +394,22 @@ pub fn EnumAdapter(comptime T: type) type {
         }
 
         pub fn descriptor(self: *const Self) !s.EnumDescriptor {
+            const self_mut: *Self = @constCast(self);
+            if (self_mut.descriptor_in_progress) {
+                const removed_skeleton = try self.allocator.dupe(i32, self.removed_numbers.items);
+                return .{
+                    .name = shortName(self.qualified_name),
+                    .qualified_name = self.qualified_name,
+                    .module_path = self.module_path,
+                    .doc = self.doc,
+                    .variants = &[_]s.EnumVariant{},
+                    .removed_numbers = removed_skeleton,
+                };
+            }
+
+            self_mut.descriptor_in_progress = true;
+            defer self_mut.descriptor_in_progress = false;
+
             const variants = try self.allocator.alloc(s.EnumVariant, self.desc_variants.items.len);
             for (self.desc_variants.items, 0..) |v, idx| {
                 switch (v) {
@@ -473,6 +493,11 @@ pub fn EnumAdapter(comptime T: type) type {
             if (eol_indent != null) {
                 try out.appendSlice(allocator, "\"UNKNOWN\"");
             } else {
+                if (u.from_wire) {
+                    try out.append(allocator, '0');
+                    return;
+                }
+
                 if (u.payload_json) |payload_json| {
                     var buf: [64]u8 = undefined;
                     const n_text = std.fmt.bufPrint(&buf, "{d}", .{u.number}) catch unreachable;
@@ -503,9 +528,9 @@ pub fn EnumAdapter(comptime T: type) type {
 
         pub fn fromJson(self: *const Self, allocator: std.mem.Allocator, json: std.json.Value, keep_unrecognized: bool) anyerror!T {
             return switch (json) {
-                .integer => |n| self.resolveConstantLookup(@intCast(n), keep_unrecognized),
-                .float => |f| self.resolveConstantLookup(@intFromFloat(@round(f)), keep_unrecognized),
-                .bool => |b| self.resolveConstantLookup(if (b) 1 else 0, keep_unrecognized),
+                .integer => |n| self.resolveConstantLookup(@intCast(n), keep_unrecognized, false),
+                .float => |f| self.resolveConstantLookup(@intFromFloat(@round(f)), keep_unrecognized, false),
+                .bool => |b| self.resolveConstantLookup(if (b) 1 else 0, keep_unrecognized, false),
                 .string => |str| blk: {
                     if (self.name_to_kind_ordinal.get(str)) |ko| {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
@@ -554,7 +579,10 @@ pub fn EnumAdapter(comptime T: type) type {
         fn fromNumberAndPayload(self: *const Self, allocator: std.mem.Allocator, number: i32, payload: std.json.Value, keep_unrecognized: bool) anyerror!T {
             if (self.number_to_entry.get(number)) |any| {
                 return switch (any) {
-                    .removed => T.default,
+                    .removed => if (keep_unrecognized)
+                        self.wrap_unrecognized(.{ .number = number, .from_wire = false })
+                    else
+                        T.default,
                     .constant => |ko| blk: {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
                             if (self.kind_ordinal_to_entry.items[ko]) |entry| {
@@ -576,15 +604,18 @@ pub fn EnumAdapter(comptime T: type) type {
 
             if (keep_unrecognized) {
                 const payload_json = try std.json.Stringify.valueAlloc(allocator, payload, .{});
-                return self.wrap_unrecognized(.{ .number = number, .payload_json = payload_json, .payload_wire = null });
+                return self.wrap_unrecognized(.{ .number = number, .from_wire = false, .payload_json = payload_json, .payload_wire = null });
             }
             return T.default;
         }
 
-        fn resolveConstantLookup(self: *const Self, number: i32, keep_unrecognized: bool) T {
+        fn resolveConstantLookup(self: *const Self, number: i32, keep_unrecognized: bool, from_wire: bool) T {
             if (self.number_to_entry.get(number)) |any| {
                 return switch (any) {
-                    .removed => T.default,
+                    .removed => if (keep_unrecognized)
+                        self.wrap_unrecognized(.{ .number = number, .from_wire = from_wire })
+                    else
+                        T.default,
                     .constant => |ko| blk: {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
                             if (self.kind_ordinal_to_entry.items[ko]) |entry| {
@@ -597,6 +628,9 @@ pub fn EnumAdapter(comptime T: type) type {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
                             if (self.kind_ordinal_to_entry.items[ko]) |entry| {
                                 if (entry.wrap_default_fn(entry.ctx)) |v| break :blk v;
+                                if (keep_unrecognized) {
+                                    break :blk self.wrap_unrecognized(.{ .number = number, .from_wire = from_wire });
+                                }
                             }
                         }
                         break :blk T.default;
@@ -605,7 +639,7 @@ pub fn EnumAdapter(comptime T: type) type {
             }
 
             if (keep_unrecognized) {
-                return self.wrap_unrecognized(.{ .number = number });
+                return self.wrap_unrecognized(.{ .number = number, .from_wire = from_wire });
             }
             return T.default;
         }
@@ -713,17 +747,19 @@ pub fn EnumAdapter(comptime T: type) type {
             const ko = self.get_kind_ordinal(input);
             if (ko == 0) {
                 if (self.get_unrecognized(input)) |u| {
-                    if (u.payload_wire) |payload_wire| {
-                        try emitWrapperHeader(u.number, allocator, out);
-                        try out.appendSlice(allocator, payload_wire);
+                    if (u.from_wire) {
+                        if (u.payload_wire) |payload_wire| {
+                            try emitWrapperHeader(u.number, allocator, out);
+                            try out.appendSlice(allocator, payload_wire);
+                            return;
+                        }
+                        try encodeI64Compat(u.number, allocator, out);
                         return;
                     }
-                    if (u.payload_json) |payload_json| {
-                        try emitWrapperHeader(u.number, allocator, out);
-                        try encodeUnknownJsonPayloadSnippet(allocator, payload_json, out);
-                        return;
-                    }
-                    try encodeI64Compat(u.number, allocator, out);
+
+                    // Unknown variants parsed from JSON are not re-encoded into
+                    // binary unknown payloads; they collapse to the default value.
+                    try out.append(allocator, 0);
                 } else {
                     try out.append(allocator, 0);
                 }
@@ -755,7 +791,7 @@ pub fn EnumAdapter(comptime T: type) type {
 
             if (wire < 242) {
                 const n: i32 = @intCast(try decodeNumberBody(wire, input));
-                return self.resolveConstantLookup(n, keep_unrecognized);
+                return self.resolveConstantLookup(n, keep_unrecognized, true);
             }
 
             const wrapper_number: i32 = if (wire == 248)
@@ -797,7 +833,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 try skipValue(input);
                 const consumed = before.len - input.*.len;
                 const payload_wire = try allocator.dupe(u8, before[0..consumed]);
-                return self.wrap_unrecognized(.{ .number = wrapper_number, .payload_json = null, .payload_wire = payload_wire });
+                return self.wrap_unrecognized(.{ .number = wrapper_number, .from_wire = true, .payload_json = null, .payload_wire = payload_wire });
             }
             try skipValue(input);
             return T.default;

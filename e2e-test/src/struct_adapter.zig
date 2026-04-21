@@ -48,6 +48,7 @@ pub fn StructAdapter(comptime T: type) type {
         slot_to_index: std.ArrayList(?usize),
         removed_numbers: std.ArrayList(i32),
         max_number: i32,
+        descriptor_in_progress: bool,
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -69,6 +70,7 @@ pub fn StructAdapter(comptime T: type) type {
                 .slot_to_index = .empty,
                 .removed_numbers = .empty,
                 .max_number = -1,
+                .descriptor_in_progress = false,
             };
         }
 
@@ -208,6 +210,22 @@ pub fn StructAdapter(comptime T: type) type {
 
         pub fn descriptor(self: *const Self) !s.StructDescriptor {
             const short_name = shortName(self.qualified_name);
+
+            const self_mut: *Self = @constCast(self);
+            if (self_mut.descriptor_in_progress) {
+                const removed_skeleton = try self.allocator.dupe(i32, self.removed_numbers.items);
+                return .{
+                    .name = short_name,
+                    .qualified_name = self.qualified_name,
+                    .module_path = self.module_path,
+                    .doc = self.doc,
+                    .fields = &[_]s.StructField{},
+                    .removed_numbers = removed_skeleton,
+                };
+            }
+
+            self_mut.descriptor_in_progress = true;
+            defer self_mut.descriptor_in_progress = false;
 
             const fields = try self.allocator.alloc(s.StructField, self.ordered_entries.items.len);
             for (self.ordered_entries.items, 0..) |entry, idx| {
@@ -354,24 +372,47 @@ pub fn StructAdapter(comptime T: type) type {
             try out.append(allocator, '}');
         }
 
-        fn getSlotCount(self: *const Self, input: *const T) usize {
+        fn getKnownSlotCount(self: *const Self, input: *const T) usize {
             var i = self.ordered_entries.items.len;
-            var known_slots: usize = 0;
             while (i > 0) {
                 i -= 1;
                 const e = self.ordered_entries.items[i];
                 if (!e.is_default_fn(e.ctx, input)) {
-                    known_slots = @intCast(e.number + 1);
-                    break;
+                    return @intCast(e.number + 1);
+                }
+            }
+            return 0;
+        }
+
+        fn getSlotCount(self: *const Self, input: *const T) usize {
+            const known_slots = self.getKnownSlotCount(input);
+
+            if (self.get_unrecognized(input)) |u| {
+                const preserve = if (u.dense_tail_json != null)
+                    true
+                else
+                    self.canPreserveUnknownDenseTail();
+                if (preserve) {
+                    const preserved_slots = self.slot_to_index.items.len + u.dense_extra_count;
+                    return @max(known_slots, preserved_slots);
                 }
             }
 
-            if (self.get_unrecognized(input)) |u| {
-                const preserved_slots = self.slot_to_index.items.len + u.dense_extra_count;
-                return @max(known_slots, preserved_slots);
-            }
-
             return known_slots;
+        }
+
+        fn maxFieldSlotCount(self: *const Self) usize {
+            var max_slot: usize = 0;
+            for (self.ordered_entries.items) |e| {
+                const slot: usize = @intCast(e.number + 1);
+                if (slot > max_slot) max_slot = slot;
+            }
+            return max_slot;
+        }
+
+        fn canPreserveUnknownDenseTail(self: *const Self) bool {
+            // Preserve unknown tail only when there are no trailing removed slots.
+            return self.slot_to_index.items.len == self.maxFieldSlotCount();
         }
 
         fn encodeI64Compat(v: i64, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
@@ -505,9 +546,18 @@ pub fn StructAdapter(comptime T: type) type {
         }
 
         pub fn encode(self: *const Self, allocator: std.mem.Allocator, input: *const T, out: *std.ArrayList(u8)) anyerror!void {
-            const slot_count = self.getSlotCount(input);
+            var slot_count = self.getKnownSlotCount(input);
             const recognized_count = self.slot_to_index.items.len;
             const maybe_unrecognized = self.get_unrecognized(input);
+            if (maybe_unrecognized) |u| {
+                if (u.dense_tail_wire != null) {
+                    const preserved_slots = recognized_count + u.dense_extra_count;
+                    slot_count = @max(slot_count, preserved_slots);
+                } else if (u.dense_tail_json != null and self.canPreserveUnknownDenseTail()) {
+                    const preserved_slots = recognized_count + u.dense_extra_count;
+                    slot_count = @max(slot_count, preserved_slots);
+                }
+            }
             if (slot_count <= 3) {
                 try out.append(allocator, @intCast(246 + slot_count));
             } else {

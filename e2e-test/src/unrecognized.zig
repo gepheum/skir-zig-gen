@@ -33,6 +33,9 @@ pub const UnrecognizedVariant = struct {
     /// Unknown enum variant number (kind discriminator).
     number: i32 = 0,
 
+    /// True when captured from binary input; false when captured from JSON.
+    from_wire: bool = false,
+
     /// Unknown wrapper payload rendered as dense JSON text.
     payload_json: ?[]const u8 = null,
 

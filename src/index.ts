@@ -414,7 +414,9 @@ class ZigSourceFileGenerator {
     this.push(`}\n`);
 
     this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
-    this.push(`if (@inComptime()) return @This()._maybeInitializingSerializer();\n`);
+    this.push(
+      `if (@inComptime()) return @This()._maybeInitializingSerializer();\n`,
+    );
     this.push(`_ = @This()._adapter();\n`);
     this.push(`return @This()._maybeInitializingSerializer();\n`);
     this.push(`}\n`);
@@ -529,7 +531,9 @@ class ZigSourceFileGenerator {
     this.push(`}\n`);
 
     this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
-    this.push(`if (@inComptime()) return @This()._maybeInitializingSerializer();\n`);
+    this.push(
+      `if (@inComptime()) return @This()._maybeInitializingSerializer();\n`,
+    );
     this.push(`_ = @This()._adapter();\n`);
     this.push(`return @This()._maybeInitializingSerializer();\n`);
     this.push(`}\n`);
