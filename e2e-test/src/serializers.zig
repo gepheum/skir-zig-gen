@@ -828,12 +828,24 @@ pub const BytesAdapter = struct {
 /// `Some(v)` delegates to `inner` for both JSON and binary encoding.
 pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(?T) {
     const ivt = inner._vtable;
-    // Declare S at function scope (not inside Adapter.typeDescriptor) so that each
-    // comptime instantiation of optionalSerializer gets its own unique S type and
-    // its own mutable statics, preventing cross-instantiation state sharing.
     const S = struct {
         var inner_td: TypeDescriptor = undefined;
         var ready = false;
+    };
+    const Ctx = struct {
+        inner: Serializer(T),
+    };
+    const CtxOps = struct {
+        fn deinitCtx(alloc: std.mem.Allocator, ptr: *anyopaque) void {
+            const ctx: *Ctx = @ptrCast(@alignCast(ptr));
+            alloc.destroy(ctx);
+        }
+
+        fn typeDescriptorAlloc(_: ?*const anyopaque, alloc: std.mem.Allocator) anyerror!TypeDescriptor {
+            const inner_td = try alloc.create(TypeDescriptor);
+            inner_td.* = ivt.typeDescriptorFn();
+            return TypeDescriptor{ .optional = inner_td };
+        }
     };
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: ?T) bool {
@@ -873,7 +885,17 @@ pub fn optionalSerializer(comptime T: type, comptime inner: Serializer(T)) Seria
             return TypeDescriptor{ .optional = &S.inner_td };
         }
     };
-    return Serializer(?T).fromAdapter(Adapter);
+
+    const ctx = std.heap.page_allocator.create(Ctx) catch unreachable;
+    ctx.* = .{ .inner = inner };
+
+    return Serializer(?T).fromAdapterWithContext(
+        Adapter,
+        ctx,
+        std.heap.page_allocator,
+        CtxOps.typeDescriptorAlloc,
+        CtxOps.deinitCtx,
+    );
 }
 
 pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(@import("recursive.zig").Recursive(T)) {
@@ -974,6 +996,21 @@ pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializ
         var inner_td: TypeDescriptor = undefined;
         var ready = false;
     };
+    const Ctx = struct {
+        inner: Serializer(T),
+    };
+    const CtxOps = struct {
+        fn deinitCtx(alloc: std.mem.Allocator, ptr: *anyopaque) void {
+            const ctx: *Ctx = @ptrCast(@alignCast(ptr));
+            alloc.destroy(ctx);
+        }
+
+        fn typeDescriptorAlloc(_: ?*const anyopaque, alloc: std.mem.Allocator) anyerror!TypeDescriptor {
+            const item_td = try alloc.create(TypeDescriptor);
+            item_td.* = ivt.typeDescriptorFn();
+            return TypeDescriptor{ .array = .{ .item_type = item_td, .key_extractor = "" } };
+        }
+    };
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: []const T) bool {
             return value.len == 0;
@@ -1045,7 +1082,17 @@ pub fn arraySerializer(comptime T: type, comptime inner: Serializer(T)) Serializ
             return TypeDescriptor{ .array = .{ .item_type = &S.inner_td, .key_extractor = "" } };
         }
     };
-    return Serializer([]const T).fromAdapter(Adapter);
+
+    const ctx = std.heap.page_allocator.create(Ctx) catch unreachable;
+    ctx.* = .{ .inner = inner };
+
+    return Serializer([]const T).fromAdapterWithContext(
+        Adapter,
+        ctx,
+        std.heap.page_allocator,
+        CtxOps.typeDescriptorAlloc,
+        CtxOps.deinitCtx,
+    );
 }
 
 /// Returns a serializer for keyed arrays (`KeyedArray(Spec)`).
@@ -1067,6 +1114,19 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
             if (@typeInfo(decl_ty) == .@"fn") break :blk Spec.keyExtractor();
         }
         break :blk "";
+    };
+    const Ctx = struct {};
+    const CtxOps = struct {
+        fn deinitCtx(alloc: std.mem.Allocator, ptr: *anyopaque) void {
+            const ctx: *Ctx = @ptrCast(@alignCast(ptr));
+            alloc.destroy(ctx);
+        }
+
+        fn typeDescriptorAlloc(_: ?*const anyopaque, alloc: std.mem.Allocator) anyerror!TypeDescriptor {
+            const item_td = try alloc.create(TypeDescriptor);
+            item_td.* = ivt.typeDescriptorFn();
+            return TypeDescriptor{ .array = .{ .item_type = item_td, .key_extractor = key_extractor_name } };
+        }
     };
 
     const Adapter = struct {
@@ -1145,7 +1205,16 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
         }
     };
 
-    return Serializer(KArr).fromAdapter(Adapter);
+    const ctx = std.heap.page_allocator.create(Ctx) catch unreachable;
+    ctx.* = .{};
+
+    return Serializer(KArr).fromAdapterWithContext(
+        Adapter,
+        ctx,
+        std.heap.page_allocator,
+        CtxOps.typeDescriptorAlloc,
+        CtxOps.deinitCtx,
+    );
 }
 
 // Duplicated Method/TypeDescriptor symbols are intentionally sourced from

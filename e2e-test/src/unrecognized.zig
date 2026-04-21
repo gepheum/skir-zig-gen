@@ -10,9 +10,17 @@
 /// it in automatically when needed. You never need to read or write this field
 /// in normal usage.
 pub const UnrecognizedFields = struct {
-    // The real library stores raw deserialized field bytes here.
-    // This stub is a placeholder — instances are never created directly by
-    // user code (the `_unrecognized` field always starts as null).
+    /// Dense-array trailing values rendered as JSON snippets, used to preserve
+    /// unknown slot values across `fromJson(..., keep_unrecognized=true)` ->
+    /// `toJson` roundtrips.
+    dense_tail_json: ?[]const []const u8 = null,
+
+    /// Count of unknown dense slots encountered beyond recognized fields.
+    dense_extra_count: usize = 0,
+
+    /// Raw wire bytes for unknown trailing dense slots encountered when
+    /// decoding binary input. Each entry is one encoded value blob.
+    dense_tail_wire: ?[]const []const u8 = null,
 };
 
 // =============================================================================
@@ -22,5 +30,12 @@ pub const UnrecognizedFields = struct {
 /// Holds raw enum payload data encountered during deserialization for an
 /// unrecognized enum variant.
 pub const UnrecognizedVariant = struct {
-    // Placeholder stub for generated UNKNOWN enum variants.
+    /// Unknown enum variant number (kind discriminator).
+    number: i32 = 0,
+
+    /// Unknown wrapper payload rendered as dense JSON text.
+    payload_json: ?[]const u8 = null,
+
+    /// Unknown wrapper payload captured as raw wire bytes.
+    payload_wire: ?[]const u8 = null,
 };

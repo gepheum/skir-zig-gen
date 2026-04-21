@@ -3,6 +3,7 @@
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
 // TODO: deduplicate serializer... defined both in serializers and serializer
 // TODO: do not expose the adapter, only expose the serializer?
+// TODO: move TypeDescriptor out of serializer.zig
 import {
   unquoteAndUnescape,
   type CodeGenerator,
@@ -413,6 +414,7 @@ class ZigSourceFileGenerator {
     this.push(`}\n`);
 
     this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(`if (@inComptime()) return @This()._maybeInitializingSerializer();\n`);
     this.push(`_ = @This()._adapter();\n`);
     this.push(`return @This()._maybeInitializingSerializer();\n`);
     this.push(`}\n`);
@@ -527,6 +529,7 @@ class ZigSourceFileGenerator {
     this.push(`}\n`);
 
     this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(`if (@inComptime()) return @This()._maybeInitializingSerializer();\n`);
     this.push(`_ = @This()._adapter();\n`);
     this.push(`return @This()._maybeInitializingSerializer();\n`);
     this.push(`}\n`);

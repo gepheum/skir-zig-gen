@@ -29,6 +29,8 @@ pub const SerializeFormat = enum {
 pub fn Serializer(comptime T: type) type {
     return struct {
         const Self = @This();
+        const CtxTypeDescriptorFn = *const fn (?*const anyopaque, std.mem.Allocator) anyerror!TypeDescriptor;
+        const CtxDeinitFn = *const fn (std.mem.Allocator, *anyopaque) void;
 
         // Each concrete adapter is a zero-size struct, so all behaviour is
         // comptime-constant. The vtable holds plain function pointers with no
@@ -105,11 +107,32 @@ pub fn Serializer(comptime T: type) type {
         };
 
         _vtable: *const VTable = vtableFor(StubImpl),
+        _ctx: ?*anyopaque = null,
+        _ctx_allocator: ?std.mem.Allocator = null,
+        _ctx_type_descriptor_fn: ?CtxTypeDescriptorFn = null,
+        _ctx_deinit_fn: ?CtxDeinitFn = null,
 
         /// Constructs a `Serializer` backed by the given adapter implementation.
         /// For use only by primitive/composite serializer factory functions.
         pub fn fromAdapter(comptime Impl: type) Self {
             return .{ ._vtable = vtableFor(Impl) };
+        }
+
+        /// Constructs a serializer backed by `Impl` and runtime context.
+        pub fn fromAdapterWithContext(
+            comptime Impl: type,
+            ctx: *anyopaque,
+            ctx_allocator: std.mem.Allocator,
+            ctx_type_descriptor_fn: CtxTypeDescriptorFn,
+            ctx_deinit_fn: CtxDeinitFn,
+        ) Self {
+            return .{
+                ._vtable = vtableFor(Impl),
+                ._ctx = ctx,
+                ._ctx_allocator = ctx_allocator,
+                ._ctx_type_descriptor_fn = ctx_type_descriptor_fn,
+                ._ctx_deinit_fn = ctx_deinit_fn,
+            };
         }
 
         // ── Public API ────────────────────────────────────────────────────────
@@ -154,9 +177,34 @@ pub fn Serializer(comptime T: type) type {
             return self._vtable.isDefaultFn(value);
         }
 
-        /// Returns the `TypeDescriptor` describing the shape of `T`.
-        pub fn typeDescriptor(self: Self) TypeDescriptor {
+        /// Returns an allocator-owned descriptor when context requires it.
+        pub fn typeDescriptorAlloc(self: Self, allocator: std.mem.Allocator) !TypeDescriptor {
+            if (self._ctx_type_descriptor_fn) |f| {
+                return f(self._ctx, allocator);
+            }
             return self._vtable.typeDescriptorFn();
+        }
+
+        /// Returns the `TypeDescriptor` describing the shape of `T`.
+        ///
+        /// For context-aware serializers, this uses `page_allocator` under the hood.
+        pub fn typeDescriptor(self: Self) TypeDescriptor {
+            if (self._ctx_type_descriptor_fn) |f| {
+                return f(self._ctx, std.heap.page_allocator) catch unreachable;
+            }
+            return self._vtable.typeDescriptorFn();
+        }
+
+        /// Releases runtime context owned by this serializer, if any.
+        pub fn deinit(self: *Self) void {
+            const ctx = self._ctx orelse return;
+            if (self._ctx_deinit_fn) |deinit_fn| {
+                deinit_fn(self._ctx_allocator orelse std.heap.page_allocator, ctx);
+            }
+            self._ctx = null;
+            self._ctx_allocator = null;
+            self._ctx_type_descriptor_fn = null;
+            self._ctx_deinit_fn = null;
         }
     };
 }
@@ -457,7 +505,7 @@ pub const TypeDescriptor = union(enum) {
 pub fn typeDescriptorToJson(allocator: std.mem.Allocator, td: TypeDescriptor) ![]const u8 {
     var records_list = std.ArrayList(RecordEntry){};
     defer records_list.deinit(allocator);
-    var seen = std.StringHashMap(void).init(allocator);
+    var seen = std.StringHashMap(usize).init(allocator);
     defer seen.deinit();
 
     try collectRecords(allocator, &td, &records_list, &seen);
@@ -494,7 +542,7 @@ fn collectRecords(
     allocator: std.mem.Allocator,
     td: *const TypeDescriptor,
     list: *std.ArrayList(RecordEntry),
-    seen: *std.StringHashMap(void),
+    seen: *std.StringHashMap(usize),
 ) error{OutOfMemory}!void {
     switch (td.*) {
         .primitive => {},
@@ -502,8 +550,25 @@ fn collectRecords(
         .array => |arr| try collectRecords(allocator, arr.item_type, list, seen),
         .struct_record => |*s| {
             const rid = s.qualified_name;
-            if (seen.contains(rid)) return;
-            try seen.put(rid, {});
+            if (seen.get(rid)) |idx| {
+                const existing = list.items[idx];
+                switch (existing) {
+                    .struct_record => |prev| {
+                        // Prefer richer struct descriptors when duplicate IDs are seen
+                        // (e.g. if a partially initializing adapter produced an empty shape).
+                        if (prev.fields.len < s.fields.len) {
+                            list.items[idx] = .{ .struct_record = s };
+                            for (s.fields) |f| {
+                                if (f.field_type) |ft| try collectRecords(allocator, ft, list, seen);
+                            }
+                        }
+                    },
+                    .enum_record => {},
+                }
+                return;
+            }
+            const idx = list.items.len;
+            try seen.put(rid, idx);
             try list.append(allocator, .{ .struct_record = s });
             for (s.fields) |f| {
                 if (f.field_type) |ft| try collectRecords(allocator, ft, list, seen);
@@ -511,8 +576,24 @@ fn collectRecords(
         },
         .enum_record => |*e| {
             const rid = e.qualified_name;
-            if (seen.contains(rid)) return;
-            try seen.put(rid, {});
+            if (seen.get(rid)) |idx| {
+                const existing = list.items[idx];
+                switch (existing) {
+                    .enum_record => |prev| {
+                        // Same strategy as structs: keep the most informative descriptor.
+                        if (prev.variants.len < e.variants.len) {
+                            list.items[idx] = .{ .enum_record = e };
+                            for (e.variants) |v| {
+                                if (v.variantType()) |vt| try collectRecords(allocator, vt, list, seen);
+                            }
+                        }
+                    },
+                    .struct_record => {},
+                }
+                return;
+            }
+            const idx = list.items.len;
+            try seen.put(rid, idx);
             try list.append(allocator, .{ .enum_record = e });
             for (e.variants) |v| {
                 if (v.variantType()) |vt| try collectRecords(allocator, vt, list, seen);
@@ -823,7 +904,9 @@ fn parseTypeDescriptorFromValue(allocator: std.mem.Allocator, root: std.json.Val
 
     // ── Resolve root type ─────────────────────────────────────────────────────
     const type_val = root.object.get("type") orelse return error.MissingTypeKey;
-    return parseTypeSignatureResolved(allocator, type_val, &record_map, &struct_fields_map, &enum_variants_map);
+    var resolving = std.StringHashMap(void).init(allocator);
+    defer resolving.deinit();
+    return parseTypeSignatureResolved(allocator, type_val, &record_map, &struct_fields_map, &enum_variants_map, &resolving);
 }
 
 const RecordKind = enum { struct_record, enum_record };
@@ -907,6 +990,7 @@ fn parseTypeSignatureResolved(
     record_map: *const std.StringHashMap(ParsedRecord),
     struct_fields_map: *const std.StringHashMap([]StructField),
     enum_variants_map: *const std.StringHashMap([]EnumVariant),
+    resolving: *std.StringHashMap(void),
 ) error{ OutOfMemory, UnknownPrimitive, UnknownTypeKind, UnknownRecordId, MissingValue, ArrayMissingItem, MalformedRecordId, FieldMissingType }!TypeDescriptor {
     const kind = getJsonStr(v, "kind");
     const val = v.object.get("value") orelse return error.MissingValue;
@@ -916,12 +1000,12 @@ fn parseTypeSignatureResolved(
         return TypeDescriptor{ .primitive = p };
     } else if (std.mem.eql(u8, kind, "optional")) {
         const inner_ptr = try allocator.create(TypeDescriptor);
-        inner_ptr.* = try parseTypeSignatureResolved(allocator, val, record_map, struct_fields_map, enum_variants_map);
+        inner_ptr.* = try parseTypeSignatureResolved(allocator, val, record_map, struct_fields_map, enum_variants_map, resolving);
         return TypeDescriptor{ .optional = inner_ptr };
     } else if (std.mem.eql(u8, kind, "array")) {
         const item_val = val.object.get("item") orelse return error.ArrayMissingItem;
         const item_ptr = try allocator.create(TypeDescriptor);
-        item_ptr.* = try parseTypeSignatureResolved(allocator, item_val, record_map, struct_fields_map, enum_variants_map);
+        item_ptr.* = try parseTypeSignatureResolved(allocator, item_val, record_map, struct_fields_map, enum_variants_map, resolving);
         const key_extractor = blk: {
             if (val.object.get("key_extractor")) |ke| break :blk try allocator.dupe(u8, ke.string);
             break :blk try allocator.dupe(u8, "");
@@ -930,9 +1014,46 @@ fn parseTypeSignatureResolved(
     } else if (std.mem.eql(u8, kind, "record")) {
         const record_id = val.string;
         const rec = record_map.get(record_id) orelse return error.UnknownRecordId;
+        if (resolving.contains(record_id)) {
+            switch (rec.kind) {
+                .struct_record => return TypeDescriptor{ .struct_record = .{
+                    .name = rec.name,
+                    .qualified_name = rec.qualified_name,
+                    .module_path = rec.module_path,
+                    .doc = rec.doc,
+                    .removed_numbers = rec.removed_numbers,
+                } },
+                .enum_record => return TypeDescriptor{ .enum_record = .{
+                    .name = rec.name,
+                    .qualified_name = rec.qualified_name,
+                    .module_path = rec.module_path,
+                    .doc = rec.doc,
+                    .removed_numbers = rec.removed_numbers,
+                } },
+            }
+        }
+
+        try resolving.put(record_id, {});
+        defer _ = resolving.remove(record_id);
+
         switch (rec.kind) {
             .struct_record => {
-                const fields = struct_fields_map.get(record_id) orelse &[_]StructField{};
+                const src_fields = struct_fields_map.get(record_id) orelse &[_]StructField{};
+                const fields = try allocator.alloc(StructField, src_fields.len);
+                for (src_fields, 0..) |f, i| {
+                    var resolved_ft: ?*const TypeDescriptor = null;
+                    if (f.field_type) |ft| {
+                        const ptr = try allocator.create(TypeDescriptor);
+                        ptr.* = try resolveResolvedTypeDescriptor(allocator, ft.*, record_map, struct_fields_map, enum_variants_map, resolving);
+                        resolved_ft = ptr;
+                    }
+                    fields[i] = .{
+                        .name = f.name,
+                        .number = f.number,
+                        .field_type = resolved_ft,
+                        .doc = f.doc,
+                    };
+                }
                 return TypeDescriptor{ .struct_record = .{
                     .name = rec.name,
                     .qualified_name = rec.qualified_name,
@@ -943,7 +1064,33 @@ fn parseTypeSignatureResolved(
                 } };
             },
             .enum_record => {
-                const variants = enum_variants_map.get(record_id) orelse &[_]EnumVariant{};
+                const src_variants = enum_variants_map.get(record_id) orelse &[_]EnumVariant{};
+                const variants = try allocator.alloc(EnumVariant, src_variants.len);
+                for (src_variants, 0..) |variant, i| {
+                    switch (variant) {
+                        .constant => |c| {
+                            variants[i] = .{ .constant = .{
+                                .name = c.name,
+                                .number = c.number,
+                                .doc = c.doc,
+                            } };
+                        },
+                        .wrapper => |w| {
+                            var resolved_vt: ?*const TypeDescriptor = null;
+                            if (w.variant_type) |vt| {
+                                const ptr = try allocator.create(TypeDescriptor);
+                                ptr.* = try resolveResolvedTypeDescriptor(allocator, vt.*, record_map, struct_fields_map, enum_variants_map, resolving);
+                                resolved_vt = ptr;
+                            }
+                            variants[i] = .{ .wrapper = .{
+                                .name = w.name,
+                                .number = w.number,
+                                .variant_type = resolved_vt,
+                                .doc = w.doc,
+                            } };
+                        },
+                    }
+                }
                 return TypeDescriptor{ .enum_record = .{
                     .name = rec.name,
                     .qualified_name = rec.qualified_name,
@@ -956,6 +1103,43 @@ fn parseTypeSignatureResolved(
         }
     } else {
         return error.UnknownTypeKind;
+    }
+}
+
+fn resolveResolvedTypeDescriptor(
+    allocator: std.mem.Allocator,
+    td: TypeDescriptor,
+    record_map: *const std.StringHashMap(ParsedRecord),
+    struct_fields_map: *const std.StringHashMap([]StructField),
+    enum_variants_map: *const std.StringHashMap([]EnumVariant),
+    resolving: *std.StringHashMap(void),
+) error{ OutOfMemory, UnknownPrimitive, UnknownTypeKind, UnknownRecordId, MissingValue, ArrayMissingItem, MalformedRecordId, FieldMissingType }!TypeDescriptor {
+    switch (td) {
+        .primitive => return td,
+        .optional => |inner| {
+            const ptr = try allocator.create(TypeDescriptor);
+            ptr.* = try resolveResolvedTypeDescriptor(allocator, inner.*, record_map, struct_fields_map, enum_variants_map, resolving);
+            return TypeDescriptor{ .optional = ptr };
+        },
+        .array => |arr| {
+            const item_ptr = try allocator.create(TypeDescriptor);
+            item_ptr.* = try resolveResolvedTypeDescriptor(allocator, arr.item_type.*, record_map, struct_fields_map, enum_variants_map, resolving);
+            return TypeDescriptor{ .array = .{ .item_type = item_ptr, .key_extractor = arr.key_extractor } };
+        },
+        .struct_record => |s| {
+            var obj = std.json.ObjectMap.init(allocator);
+            try obj.put("kind", .{ .string = "record" });
+            const rid = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ s.module_path, s.qualified_name });
+            try obj.put("value", .{ .string = rid });
+            return parseTypeSignatureResolved(allocator, .{ .object = obj }, record_map, struct_fields_map, enum_variants_map, resolving);
+        },
+        .enum_record => |e| {
+            var obj = std.json.ObjectMap.init(allocator);
+            try obj.put("kind", .{ .string = "record" });
+            const rid = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ e.module_path, e.qualified_name });
+            try obj.put("value", .{ .string = rid });
+            return parseTypeSignatureResolved(allocator, .{ .object = obj }, record_map, struct_fields_map, enum_variants_map, resolving);
+        },
     }
 }
 

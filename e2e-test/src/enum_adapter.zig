@@ -392,7 +392,40 @@ pub fn EnumAdapter(comptime T: type) type {
         pub fn descriptor(self: *const Self) !s.EnumDescriptor {
             const variants = try self.allocator.alloc(s.EnumVariant, self.desc_variants.items.len);
             for (self.desc_variants.items, 0..) |v, idx| {
-                variants[idx] = v;
+                switch (v) {
+                    .constant => |c| {
+                        variants[idx] = .{ .constant = .{
+                            .name = c.name,
+                            .number = c.number,
+                            .doc = c.doc,
+                        } };
+                    },
+                    .wrapper => |w| {
+                        var vt_ptr: ?*const s.TypeDescriptor = null;
+                        if (self.number_to_entry.get(w.number)) |nk| {
+                            switch (nk) {
+                                .wrapper => |kind_ordinal| {
+                                    if (kind_ordinal < self.kind_ordinal_to_entry.items.len) {
+                                        if (self.kind_ordinal_to_entry.items[kind_ordinal]) |entry| {
+                                            const td = entry.variant_type_fn(entry.ctx) orelse unreachable;
+                                            const ptr = try self.allocator.create(s.TypeDescriptor);
+                                            ptr.* = td;
+                                            vt_ptr = ptr;
+                                        }
+                                    }
+                                },
+                                .constant => {},
+                                .removed => {},
+                            }
+                        }
+                        variants[idx] = .{ .wrapper = .{
+                            .name = w.name,
+                            .number = w.number,
+                            .variant_type = vt_ptr,
+                            .doc = w.doc,
+                        } };
+                    },
+                }
             }
             const removed = try self.allocator.dupe(i32, self.removed_numbers.items);
             return .{
@@ -429,12 +462,42 @@ pub fn EnumAdapter(comptime T: type) type {
         }
 
         fn unknownToJson(self: *const Self, allocator: std.mem.Allocator, input: *const T, eol_indent: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
-            _ = self;
-            _ = input;
+            const u = self.get_unrecognized(input) orelse {
+                if (eol_indent != null) {
+                    try out.appendSlice(allocator, "\"UNKNOWN\"");
+                } else {
+                    try out.append(allocator, '0');
+                }
+                return;
+            };
             if (eol_indent != null) {
                 try out.appendSlice(allocator, "\"UNKNOWN\"");
             } else {
-                try out.append(allocator, '0');
+                if (u.payload_json) |payload_json| {
+                    var buf: [64]u8 = undefined;
+                    const n_text = std.fmt.bufPrint(&buf, "{d}", .{u.number}) catch unreachable;
+                    try out.append(allocator, '[');
+                    try out.appendSlice(allocator, n_text);
+                    try out.append(allocator, ',');
+                    try out.appendSlice(allocator, payload_json);
+                    try out.append(allocator, ']');
+                    return;
+                }
+
+                if (u.payload_wire) |payload_wire| {
+                    var buf: [64]u8 = undefined;
+                    const n_text = std.fmt.bufPrint(&buf, "{d}", .{u.number}) catch unreachable;
+                    try out.append(allocator, '[');
+                    try out.appendSlice(allocator, n_text);
+                    try out.append(allocator, ',');
+                    try appendUnknownPayloadWireAsDenseJson(allocator, payload_wire, out);
+                    try out.append(allocator, ']');
+                    return;
+                }
+
+                var buf: [64]u8 = undefined;
+                const text = std.fmt.bufPrint(&buf, "{d}", .{u.number}) catch unreachable;
+                try out.appendSlice(allocator, text);
             }
         }
 
@@ -512,7 +575,8 @@ pub fn EnumAdapter(comptime T: type) type {
             }
 
             if (keep_unrecognized) {
-                return self.wrap_unrecognized(.{});
+                const payload_json = try std.json.Stringify.valueAlloc(allocator, payload, .{});
+                return self.wrap_unrecognized(.{ .number = number, .payload_json = payload_json, .payload_wire = null });
             }
             return T.default;
         }
@@ -541,15 +605,128 @@ pub fn EnumAdapter(comptime T: type) type {
             }
 
             if (keep_unrecognized) {
-                return self.wrap_unrecognized(.{});
+                return self.wrap_unrecognized(.{ .number = number });
             }
             return T.default;
+        }
+
+        fn encodeI64Compat(v: i64, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
+            if (v >= std.math.minInt(i32) and v <= -65537) {
+                try out.append(allocator, 237);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(i32, @intCast(v))));
+            } else if (v >= -65536 and v <= -257) {
+                try out.append(allocator, 236);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u16, @intCast(v + 65536))));
+            } else if (v >= -256 and v <= -1) {
+                try out.append(allocator, 235);
+                try out.append(allocator, @as(u8, @intCast(v + 256)));
+            } else if (v >= 0 and v <= 231) {
+                try out.append(allocator, @intCast(v));
+            } else if (v >= 232 and v <= 65535) {
+                try out.append(allocator, 232);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u16, @intCast(v))));
+            } else if (v <= std.math.maxInt(i32)) {
+                try out.append(allocator, 233);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u32, @bitCast(@as(i32, @intCast(v))))));
+            } else {
+                try out.append(allocator, 238);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(i64, v)));
+            }
+        }
+
+        fn emitWrapperHeader(number: i32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
+            if (number >= 1 and number <= 4) {
+                try out.append(allocator, @intCast(250 + number));
+            } else {
+                try out.append(allocator, 248);
+                try encodeUint32(@intCast(number), allocator, out);
+            }
+        }
+
+        fn encodeUnknownJsonPayloadValue(allocator: std.mem.Allocator, value: std.json.Value, out: *std.ArrayList(u8)) anyerror!void {
+            switch (value) {
+                .null => try out.append(allocator, 0),
+                .bool => |b| try out.append(allocator, if (b) 1 else 0),
+                .integer => |n| try encodeI64Compat(n, allocator, out),
+                .float => |f| try encodeI64Compat(@intFromFloat(@round(f)), allocator, out),
+                .number_string => |snum| {
+                    if (std.fmt.parseInt(i64, snum, 10)) |n| {
+                        try encodeI64Compat(n, allocator, out);
+                    } else |_| {
+                        if (std.fmt.parseFloat(f64, snum)) |f| {
+                            try encodeI64Compat(@intFromFloat(@round(f)), allocator, out);
+                        } else |_| {
+                            try out.append(allocator, 0);
+                        }
+                    }
+                },
+                .string => |str| {
+                    if (str.len == 0) {
+                        try out.append(allocator, 242);
+                    } else {
+                        try out.append(allocator, 243);
+                        try encodeUint32(@intCast(str.len), allocator, out);
+                        try out.appendSlice(allocator, str);
+                    }
+                },
+                .array => |arr| {
+                    const n = arr.items.len;
+                    if (n == 0) {
+                        try out.append(allocator, 246);
+                    } else if (n <= 3) {
+                        try out.append(allocator, @intCast(246 + n));
+                    } else {
+                        try out.append(allocator, 250);
+                        try encodeUint32(@intCast(n), allocator, out);
+                    }
+                    for (arr.items) |item| {
+                        try encodeUnknownJsonPayloadValue(allocator, item, out);
+                    }
+                },
+                else => try out.append(allocator, 0),
+            }
+        }
+
+        fn encodeUnknownJsonPayloadSnippet(allocator: std.mem.Allocator, payload_json: []const u8, out: *std.ArrayList(u8)) anyerror!void {
+            const parsed = try std.json.parseFromSlice(std.json.Value, allocator, payload_json, .{});
+            defer parsed.deinit();
+            try encodeUnknownJsonPayloadValue(allocator, parsed.value, out);
+        }
+
+        fn appendUnknownPayloadWireAsDenseJson(allocator: std.mem.Allocator, payload_wire: []const u8, out: *std.ArrayList(u8)) anyerror!void {
+            var input = payload_wire;
+            const wire = try readU8(&input);
+            switch (wire) {
+                0...241 => {
+                    const n = try decodeNumberBody(wire, &input);
+                    var buf: [64]u8 = undefined;
+                    const text = std.fmt.bufPrint(&buf, "{d}", .{n}) catch unreachable;
+                    try out.appendSlice(allocator, text);
+                },
+                242 => try out.appendSlice(allocator, "\"\""),
+                246 => try out.appendSlice(allocator, "[]"),
+                else => try out.append(allocator, '0'),
+            }
         }
 
         pub fn encode(self: *const Self, allocator: std.mem.Allocator, input: *const T, out: *std.ArrayList(u8)) anyerror!void {
             const ko = self.get_kind_ordinal(input);
             if (ko == 0) {
-                try out.append(allocator, 0);
+                if (self.get_unrecognized(input)) |u| {
+                    if (u.payload_wire) |payload_wire| {
+                        try emitWrapperHeader(u.number, allocator, out);
+                        try out.appendSlice(allocator, payload_wire);
+                        return;
+                    }
+                    if (u.payload_json) |payload_json| {
+                        try emitWrapperHeader(u.number, allocator, out);
+                        try encodeUnknownJsonPayloadSnippet(allocator, payload_json, out);
+                        return;
+                    }
+                    try encodeI64Compat(u.number, allocator, out);
+                } else {
+                    try out.append(allocator, 0);
+                }
                 return;
             }
 
@@ -593,7 +770,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     .wrapper => |ko| blk: {
                         if (ko < self.kind_ordinal_to_entry.items.len) {
                             if (self.kind_ordinal_to_entry.items[ko]) |entry| {
-                                break :blk try entry.wrap_decode_fn(entry.ctx, allocator, input, keep_unrecognized);
+                                break :blk try entry.wrap_decode_fn(entry.ctx, allocator, input, false);
                             }
                         }
                         try skipValue(input);
@@ -615,10 +792,14 @@ pub fn EnumAdapter(comptime T: type) type {
                 };
             }
 
-            try skipValue(input);
             if (keep_unrecognized) {
-                return self.wrap_unrecognized(.{});
+                const before = input.*;
+                try skipValue(input);
+                const consumed = before.len - input.*.len;
+                const payload_wire = try allocator.dupe(u8, before[0..consumed]);
+                return self.wrap_unrecognized(.{ .number = wrapper_number, .payload_json = null, .payload_wire = payload_wire });
             }
+            try skipValue(input);
             return T.default;
         }
 

@@ -251,9 +251,11 @@ pub fn StructAdapter(comptime T: type) type {
         fn toDenseJson(self: *const Self, allocator: std.mem.Allocator, input: *const T, out: *std.ArrayList(u8)) anyerror!void {
             try out.append(allocator, '[');
             const slot_count = self.getSlotCount(input);
+            const recognized_count = self.slot_to_index.items.len;
+            const maybe_unrecognized = self.get_unrecognized(input);
             for (0..slot_count) |slot| {
                 if (slot > 0) try out.append(allocator, ',');
-                if (slot < self.slot_to_index.items.len) {
+                if (slot < recognized_count) {
                     if (self.slot_to_index.items[slot]) |idx| {
                         const e = self.ordered_entries.items[idx];
                         try e.to_json_fn(e.ctx, allocator, input, null, out);
@@ -261,10 +263,70 @@ pub fn StructAdapter(comptime T: type) type {
                         try out.append(allocator, '0');
                     }
                 } else {
+                    if (maybe_unrecognized) |u| {
+                        const tail_index = slot - recognized_count;
+                        if (u.dense_tail_wire) |tail_wire| {
+                            if (tail_index < tail_wire.len) {
+                                try appendWireValueAsDenseJson(allocator, tail_wire[tail_index], out);
+                                continue;
+                            }
+                        }
+                        if (u.dense_tail_json) |tail| {
+                            if (tail_index < tail.len) {
+                                try out.appendSlice(allocator, tail[tail_index]);
+                                continue;
+                            }
+                        }
+                    }
                     try out.append(allocator, '0');
                 }
             }
             try out.append(allocator, ']');
+        }
+
+        fn appendWireValueAsDenseJson(allocator: std.mem.Allocator, raw: []const u8, out: *std.ArrayList(u8)) anyerror!void {
+            var rest = raw;
+            try appendWireValueAsDenseJsonFromInput(allocator, &rest, out);
+        }
+
+        fn appendWireValueAsDenseJsonFromInput(allocator: std.mem.Allocator, input: *[]const u8, out: *std.ArrayList(u8)) anyerror!void {
+            const wire = try readU8(input);
+            switch (wire) {
+                0...241 => {
+                    const n = try decodeNumberBody(wire, input);
+                    var buf: [64]u8 = undefined;
+                    const text = std.fmt.bufPrint(&buf, "{d}", .{n}) catch unreachable;
+                    try out.appendSlice(allocator, text);
+                },
+                242 => try out.appendSlice(allocator, "\"\""),
+                243 => {
+                    const n: usize = @intCast(try decodeNumber(input));
+                    if (input.*.len < n) return error.UnexpectedEndOfInput;
+                    const sbytes = input.*[0..n];
+                    input.* = input.*[n..];
+                    try writeJsonEscapedString(sbytes, allocator, out);
+                },
+                246 => try out.appendSlice(allocator, "[]"),
+                247...249 => {
+                    const n: usize = @intCast(wire - 246);
+                    try out.append(allocator, '[');
+                    for (0..n) |i| {
+                        if (i > 0) try out.append(allocator, ',');
+                        try appendWireValueAsDenseJsonFromInput(allocator, input, out);
+                    }
+                    try out.append(allocator, ']');
+                },
+                250 => {
+                    const n: usize = @intCast(try decodeNumber(input));
+                    try out.append(allocator, '[');
+                    for (0..n) |i| {
+                        if (i > 0) try out.append(allocator, ',');
+                        try appendWireValueAsDenseJsonFromInput(allocator, input, out);
+                    }
+                    try out.append(allocator, ']');
+                },
+                else => try out.append(allocator, '0'),
+            }
         }
 
         fn toReadableJson(self: *const Self, allocator: std.mem.Allocator, input: *const T, eol_indent: []const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -294,14 +356,96 @@ pub fn StructAdapter(comptime T: type) type {
 
         fn getSlotCount(self: *const Self, input: *const T) usize {
             var i = self.ordered_entries.items.len;
+            var known_slots: usize = 0;
             while (i > 0) {
                 i -= 1;
                 const e = self.ordered_entries.items[i];
                 if (!e.is_default_fn(e.ctx, input)) {
-                    return @intCast(e.number + 1);
+                    known_slots = @intCast(e.number + 1);
+                    break;
                 }
             }
-            return 0;
+
+            if (self.get_unrecognized(input)) |u| {
+                const preserved_slots = self.slot_to_index.items.len + u.dense_extra_count;
+                return @max(known_slots, preserved_slots);
+            }
+
+            return known_slots;
+        }
+
+        fn encodeI64Compat(v: i64, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
+            if (v >= std.math.minInt(i32) and v <= -65537) {
+                try out.append(allocator, 237);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(i32, @intCast(v))));
+            } else if (v >= -65536 and v <= -257) {
+                try out.append(allocator, 236);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u16, @intCast(v + 65536))));
+            } else if (v >= -256 and v <= -1) {
+                try out.append(allocator, 235);
+                try out.append(allocator, @as(u8, @intCast(v + 256)));
+            } else if (v >= 0 and v <= 231) {
+                try out.append(allocator, @intCast(v));
+            } else if (v >= 232 and v <= 65535) {
+                try out.append(allocator, 232);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u16, @intCast(v))));
+            } else if (v <= std.math.maxInt(i32)) {
+                try out.append(allocator, 233);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u32, @bitCast(@as(i32, @intCast(v))))));
+            } else {
+                try out.append(allocator, 238);
+                try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(i64, v)));
+            }
+        }
+
+        fn encodeUnknownJsonValue(allocator: std.mem.Allocator, value: std.json.Value, out: *std.ArrayList(u8)) anyerror!void {
+            switch (value) {
+                .null => try out.append(allocator, 0),
+                .bool => |b| try out.append(allocator, if (b) 1 else 0),
+                .integer => |n| try encodeI64Compat(n, allocator, out),
+                .float => |f| try encodeI64Compat(@intFromFloat(@round(f)), allocator, out),
+                .number_string => |snum| {
+                    if (std.fmt.parseInt(i64, snum, 10)) |n| {
+                        try encodeI64Compat(n, allocator, out);
+                    } else |_| {
+                        if (std.fmt.parseFloat(f64, snum)) |f| {
+                            try encodeI64Compat(@intFromFloat(@round(f)), allocator, out);
+                        } else |_| {
+                            try out.append(allocator, 0);
+                        }
+                    }
+                },
+                .string => |str| {
+                    if (str.len == 0) {
+                        try out.append(allocator, 242);
+                    } else {
+                        try out.append(allocator, 243);
+                        try encodeUint32(@intCast(str.len), allocator, out);
+                        try out.appendSlice(allocator, str);
+                    }
+                },
+                .array => |arr| {
+                    const n = arr.items.len;
+                    if (n == 0) {
+                        try out.append(allocator, 246);
+                    } else if (n <= 3) {
+                        try out.append(allocator, @intCast(246 + n));
+                    } else {
+                        try out.append(allocator, 250);
+                        try encodeUint32(@intCast(n), allocator, out);
+                    }
+                    for (arr.items) |item| {
+                        try encodeUnknownJsonValue(allocator, item, out);
+                    }
+                },
+                else => try out.append(allocator, 0),
+            }
+        }
+
+        fn encodeUnknownJsonSnippet(allocator: std.mem.Allocator, json_snippet: []const u8, out: *std.ArrayList(u8)) anyerror!void {
+            const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_snippet, .{});
+            defer parsed.deinit();
+            try encodeUnknownJsonValue(allocator, parsed.value, out);
         }
 
         pub fn fromJson(self: *const Self, allocator: std.mem.Allocator, json: std.json.Value, keep_unrecognized: bool) anyerror!T {
@@ -320,7 +464,19 @@ pub fn StructAdapter(comptime T: type) type {
 
             if (n > recognized_count) {
                 if (keep_unrecognized) {
-                    self.set_unrecognized(&t, .{});
+                    const extra = items[recognized_count..n];
+                    var rendered = try allocator.alloc([]const u8, extra.len);
+                    errdefer allocator.free(rendered);
+
+                    for (extra, 0..) |value, idx| {
+                        rendered[idx] = try std.json.Stringify.valueAlloc(allocator, value, .{});
+                    }
+
+                    self.set_unrecognized(&t, .{
+                        .dense_tail_json = rendered,
+                        .dense_extra_count = extra.len,
+                        .dense_tail_wire = null,
+                    });
                 }
                 n = recognized_count;
             }
@@ -350,6 +506,8 @@ pub fn StructAdapter(comptime T: type) type {
 
         pub fn encode(self: *const Self, allocator: std.mem.Allocator, input: *const T, out: *std.ArrayList(u8)) anyerror!void {
             const slot_count = self.getSlotCount(input);
+            const recognized_count = self.slot_to_index.items.len;
+            const maybe_unrecognized = self.get_unrecognized(input);
             if (slot_count <= 3) {
                 try out.append(allocator, @intCast(246 + slot_count));
             } else {
@@ -358,7 +516,7 @@ pub fn StructAdapter(comptime T: type) type {
             }
 
             for (0..slot_count) |slot| {
-                if (slot < self.slot_to_index.items.len) {
+                if (slot < recognized_count) {
                     if (self.slot_to_index.items[slot]) |idx| {
                         const e = self.ordered_entries.items[idx];
                         try e.encode_fn(e.ctx, allocator, input, out);
@@ -366,6 +524,21 @@ pub fn StructAdapter(comptime T: type) type {
                         try out.append(allocator, 0);
                     }
                 } else {
+                    if (maybe_unrecognized) |u| {
+                        const tail_index = slot - recognized_count;
+                        if (u.dense_tail_wire) |tail_wire| {
+                            if (tail_index < tail_wire.len) {
+                                try out.appendSlice(allocator, tail_wire[tail_index]);
+                                continue;
+                            }
+                        }
+                        if (u.dense_tail_json) |tail| {
+                            if (tail_index < tail.len) {
+                                try encodeUnknownJsonSnippet(allocator, tail[tail_index], out);
+                                continue;
+                            }
+                        }
+                    }
                     try out.append(allocator, 0);
                 }
             }
@@ -398,11 +571,29 @@ pub fn StructAdapter(comptime T: type) type {
 
             if (encoded_slot_count > recognized_count) {
                 if (keep_unrecognized) {
-                    self.set_unrecognized(&t, .{});
-                }
-                var j: usize = recognized_count;
-                while (j < encoded_slot_count) : (j += 1) {
-                    try skipValue(input);
+                    const extra_count = encoded_slot_count - recognized_count;
+                    var tail_wire = try allocator.alloc([]const u8, extra_count);
+                    errdefer allocator.free(tail_wire);
+
+                    var j: usize = recognized_count;
+                    while (j < encoded_slot_count) : (j += 1) {
+                        const idx = j - recognized_count;
+                        const before = input.*;
+                        try skipValue(input);
+                        const consumed = before.len - input.*.len;
+                        tail_wire[idx] = try allocator.dupe(u8, before[0..consumed]);
+                    }
+
+                    self.set_unrecognized(&t, .{
+                        .dense_tail_json = null,
+                        .dense_extra_count = extra_count,
+                        .dense_tail_wire = tail_wire,
+                    });
+                } else {
+                    var j: usize = recognized_count;
+                    while (j < encoded_slot_count) : (j += 1) {
+                        try skipValue(input);
+                    }
                 }
             }
 
