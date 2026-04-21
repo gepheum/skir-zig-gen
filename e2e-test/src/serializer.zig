@@ -2,6 +2,7 @@ const std = @import("std");
 const type_descriptor = @import("type_descriptor.zig");
 
 const TypeDescriptor = type_descriptor.TypeDescriptor;
+const TypeDescriptorMap = type_descriptor.TypeDescriptorMap;
 
 // =============================================================================
 // SerializeFormat
@@ -43,7 +44,7 @@ pub fn Serializer(comptime T: type) type {
             fromJsonFn: *const fn (std.mem.Allocator, std.json.Value, bool) anyerror!T,
             encodeFn: *const fn (std.mem.Allocator, T, *std.ArrayList(u8)) anyerror!void,
             decodeFn: *const fn (std.mem.Allocator, *[]const u8, bool) anyerror!T,
-            typeDescriptorFn: *const fn (std.mem.Allocator) anyerror!TypeDescriptor,
+            typeDescriptorFn: *const fn (std.mem.Allocator, *TypeDescriptorMap) anyerror!*TypeDescriptor,
         };
 
         fn vtableFor(comptime Impl: type) *const VTable {
@@ -53,9 +54,9 @@ pub fn Serializer(comptime T: type) type {
                     return impl.isDefault(value);
                 }
 
-                fn doTypeDescriptor(allocator: std.mem.Allocator) anyerror!TypeDescriptor {
+                fn doTypeDescriptor(allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
                     const impl: Impl = .{};
-                    return impl.typeDescriptor(allocator);
+                    return impl.typeDescriptor(allocator, descriptors);
                 }
 
                 fn doToJson(alloc: std.mem.Allocator, value: T, eol: ?[]const u8, out: *std.ArrayList(u8)) anyerror!void {
@@ -103,8 +104,9 @@ pub fn Serializer(comptime T: type) type {
             pub fn decode(_: @This(), _: std.mem.Allocator, _: *[]const u8, _: bool) anyerror!T {
                 return error.Stub;
             }
-            pub fn typeDescriptor(_: @This(), _: std.mem.Allocator) anyerror!TypeDescriptor {
-                return TypeDescriptor{ .primitive = .Bool };
+            pub fn typeDescriptor(_: @This(), _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+                const static: TypeDescriptor = .{ .primitive = .Bool };
+                return @constCast(&static);
             }
         };
 
@@ -156,7 +158,10 @@ pub fn Serializer(comptime T: type) type {
 
         /// Returns the `TypeDescriptor` describing the shape of `T`.
         pub fn typeDescriptor(self: Self, allocator: std.mem.Allocator) !TypeDescriptor {
-            return self._vtable.typeDescriptorFn(allocator);
+            var descriptors = TypeDescriptorMap.init(allocator);
+            defer descriptors.deinit();
+            const ptr = try self._vtable.typeDescriptorFn(allocator, &descriptors);
+            return ptr.*;
         }
     };
 }

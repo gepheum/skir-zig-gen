@@ -1,7 +1,9 @@
 // TODO: think about what to expose... use internal as much as possible
+// TODO: understand how recursive type descriptor actually work...
 // TODO: story around recursive?
 // TODO: comments
 // TODO: Service and ServiceClient
+// TODO: You should not use the qualified _name as the map key in typeDescriptor, you should use the recordId; see the definition in type_descriptor.zig, it's basically a combination of the module path and the qualified name.
 import {
   unquoteAndUnescape,
   type CodeGenerator,

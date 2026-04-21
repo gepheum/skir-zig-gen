@@ -34,7 +34,7 @@ pub fn StructAdapter(comptime T: type) type {
             set_from_json_fn: *const fn (*const anyopaque, std.mem.Allocator, *T, std.json.Value, bool) anyerror!void,
             encode_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, *std.ArrayList(u8)) anyerror!void,
             decode_into_fn: *const fn (*const anyopaque, std.mem.Allocator, *T, *[]const u8, bool) anyerror!void,
-            field_type_fn: *const fn (*const anyopaque, std.mem.Allocator) anyerror!td.TypeDescriptor,
+            field_type_fn: *const fn (*const anyopaque, std.mem.Allocator, *td.TypeDescriptorMap) anyerror!*td.TypeDescriptor,
         };
 
         allocator: std.mem.Allocator,
@@ -49,7 +49,6 @@ pub fn StructAdapter(comptime T: type) type {
         slot_to_index: std.ArrayList(?usize),
         removed_numbers: std.ArrayList(i32),
         max_number: i32,
-        descriptor_in_progress: bool,
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -71,7 +70,6 @@ pub fn StructAdapter(comptime T: type) type {
                 .slot_to_index = .empty,
                 .removed_numbers = .empty,
                 .max_number = -1,
-                .descriptor_in_progress = false,
             };
         }
 
@@ -145,9 +143,9 @@ pub fn StructAdapter(comptime T: type) type {
                     ctx.setter(value, v);
                 }
 
-                fn fieldType(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator) anyerror!td.TypeDescriptor {
+                fn fieldType(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator, descriptors: *td.TypeDescriptorMap) anyerror!*td.TypeDescriptor {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
-                    return ctx.ser._vtable.typeDescriptorFn(allocator);
+                    return ctx.ser._vtable.typeDescriptorFn(allocator, descriptors);
                 }
             };
 
@@ -209,40 +207,38 @@ pub fn StructAdapter(comptime T: type) type {
             }
         }
 
-        pub fn descriptor(self: *const Self) !td.StructDescriptor {
+        pub fn descriptor(self: *const Self, descriptors: *td.TypeDescriptorMap) !*td.TypeDescriptor {
             const short_name = shortName(self.qualified_name);
 
-            const self_mut: *Self = @constCast(self);
-            if (self_mut.descriptor_in_progress) {
-                const removed_skeleton = try self.allocator.dupe(i32, self.removed_numbers.items);
-                return .{
-                    .name = short_name,
-                    .qualified_name = self.qualified_name,
-                    .module_path = self.module_path,
-                    .doc = self.doc,
-                    .fields = &[_]td.StructField{},
-                    .removed_numbers = removed_skeleton,
-                };
+            if (descriptors.get(self.qualified_name)) |existing_ptr| {
+                return existing_ptr;
             }
 
-            self_mut.descriptor_in_progress = true;
-            defer self_mut.descriptor_in_progress = false;
+            const skeleton_removed = try self.allocator.dupe(i32, self.removed_numbers.items);
+            const descriptor_ptr = try self.allocator.create(td.TypeDescriptor);
+            descriptor_ptr.* = .{ .struct_record = .{
+                .name = short_name,
+                .qualified_name = self.qualified_name,
+                .module_path = self.module_path,
+                .doc = self.doc,
+                .fields = &[_]td.StructField{},
+                .removed_numbers = skeleton_removed,
+            } };
+            try descriptors.put(self.qualified_name, descriptor_ptr);
 
             const fields = try self.allocator.alloc(td.StructField, self.ordered_entries.items.len);
             for (self.ordered_entries.items, 0..) |entry, idx| {
-                const ft = try self.allocator.create(td.TypeDescriptor);
-                ft.* = try entry.field_type_fn(entry.ctx, self.allocator);
                 fields[idx] = .{
                     .name = entry.name,
                     .number = entry.number,
-                    .field_type = ft,
+                    .field_type = try entry.field_type_fn(entry.ctx, self.allocator, descriptors),
                     .doc = entry.doc,
                 };
             }
 
             const removed = try self.allocator.dupe(i32, self.removed_numbers.items);
 
-            return .{
+            const full: td.StructDescriptor = .{
                 .name = short_name,
                 .qualified_name = self.qualified_name,
                 .module_path = self.module_path,
@@ -250,6 +246,8 @@ pub fn StructAdapter(comptime T: type) type {
                 .fields = fields,
                 .removed_numbers = removed,
             };
+            descriptor_ptr.* = .{ .struct_record = full };
+            return descriptor_ptr;
         }
 
         pub fn isDefault(self: *const Self, input: *const T) bool {
@@ -651,8 +649,9 @@ pub fn StructAdapter(comptime T: type) type {
             return t;
         }
 
-        pub fn typeDescriptor(self: *const Self) anyerror!td.TypeDescriptor {
-            return .{ .struct_record = try self.descriptor() };
+        pub fn typeDescriptor(self: *const Self, allocator: std.mem.Allocator, descriptors: *td.TypeDescriptorMap) anyerror!*td.TypeDescriptor {
+            _ = allocator;
+            return self.descriptor(descriptors);
         }
 
         fn shortName(qualified_name: []const u8) []const u8 {
@@ -686,9 +685,8 @@ pub fn structSerializerFromStatic(comptime T: type, comptime get_adapter: *const
             return get_adapter().decode(allocator, input, keep_unrecognized);
         }
 
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!td.TypeDescriptor {
-            _ = allocator;
-            return get_adapter().typeDescriptor();
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *td.TypeDescriptorMap) anyerror!*td.TypeDescriptor {
+            return get_adapter().typeDescriptor(allocator, descriptors);
         }
     };
 

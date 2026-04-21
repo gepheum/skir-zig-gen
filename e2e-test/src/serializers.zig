@@ -23,6 +23,7 @@ const EnumVariant = type_descriptor.EnumVariant;
 const StructDescriptor = type_descriptor.StructDescriptor;
 const EnumDescriptor = type_descriptor.EnumDescriptor;
 const TypeDescriptor = type_descriptor.TypeDescriptor;
+const TypeDescriptorMap = type_descriptor.TypeDescriptorMap;
 const readU8 = decode_utils.readU8;
 const readU16Le = decode_utils.readU16Le;
 const readU32Le = decode_utils.readU32Le;
@@ -78,9 +79,9 @@ pub const BoolAdapter = struct {
         return b != 0;
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .Bool };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .Bool };
+        return @constCast(&static);
     }
 };
 
@@ -152,9 +153,9 @@ pub const Int32Adapter = struct {
         };
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .Int32 };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .Int32 };
+        return @constCast(&static);
     }
 };
 
@@ -210,9 +211,9 @@ pub const Int64Adapter = struct {
         return decodeNumber(input);
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .Int64 };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .Int64 };
+        return @constCast(&static);
     }
 };
 
@@ -272,9 +273,9 @@ pub const Hash64Adapter = struct {
         return @bitCast(try decodeNumber(input));
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .Hash64 };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .Hash64 };
+        return @constCast(&static);
     }
 };
 
@@ -420,9 +421,9 @@ pub const TimestampAdapter = struct {
         return Timestamp{ .unix_millis = ms };
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .Timestamp };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .Timestamp };
+        return @constCast(&static);
     }
 };
 
@@ -492,9 +493,9 @@ pub const Float32Adapter = struct {
         }
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .Float32 };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .Float32 };
+        return @constCast(&static);
     }
 };
 
@@ -553,9 +554,9 @@ pub const Float64Adapter = struct {
         }
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .Float64 };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .Float64 };
+        return @constCast(&static);
     }
 };
 
@@ -641,9 +642,9 @@ pub const StringAdapter = struct {
         return utf8LossyDupe(raw, allocator);
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .String };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .String };
+        return @constCast(&static);
     }
 };
 
@@ -822,9 +823,9 @@ pub const BytesAdapter = struct {
         return bytes;
     }
 
-    pub fn typeDescriptor(_: Self, allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-        _ = allocator;
-        return TypeDescriptor{ .primitive = .Bytes };
+    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        const static: TypeDescriptor = .{ .primitive = .Bytes };
+        return @constCast(&static);
     }
 };
 
@@ -869,10 +870,11 @@ pub fn optionalSerializer(comptime inner: anytype) Serializer(?@TypeOf(inner).Va
             }
             return try ivt.decodeFn(alloc, input, keep);
         }
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-            const inner_td = try allocator.create(TypeDescriptor);
-            inner_td.* = try ivt.typeDescriptorFn(allocator);
-            return TypeDescriptor{ .optional = inner_td };
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+            const inner_ptr = try ivt.typeDescriptorFn(allocator, descriptors);
+            const result = try allocator.create(TypeDescriptor);
+            result.* = TypeDescriptor{ .optional = inner_ptr };
+            return result;
         }
     };
 
@@ -920,8 +922,8 @@ pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Seri
             return .{ .value = p };
         }
 
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-            return ivt.typeDescriptorFn(allocator);
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+            return ivt.typeDescriptorFn(allocator, descriptors);
         }
     };
 
@@ -957,8 +959,8 @@ pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serial
             return p;
         }
 
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-            return ivt.typeDescriptorFn(allocator);
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+            return ivt.typeDescriptorFn(allocator, descriptors);
         }
     };
 
@@ -1037,10 +1039,11 @@ pub fn arraySerializer(comptime inner: anytype) Serializer([]const @TypeOf(inner
             for (0..n) |i| items[i] = try ivt.decodeFn(alloc, input, keep);
             return items;
         }
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-            const item_td = try allocator.create(TypeDescriptor);
-            item_td.* = try ivt.typeDescriptorFn(allocator);
-            return TypeDescriptor{ .array = .{ .item_type = item_td, .key_extractor = "" } };
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+            const item_ptr = try ivt.typeDescriptorFn(allocator, descriptors);
+            const result = try allocator.create(TypeDescriptor);
+            result.* = TypeDescriptor{ .array = .{ .item_type = item_ptr, .key_extractor = "" } };
+            return result;
         }
     };
 
@@ -1055,15 +1058,6 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
     const Value = Spec.Value;
     const KArr = KeyedArray(Spec);
     const ivt = inner._vtable;
-    const key_extractor_name = comptime blk: {
-        if (@hasDecl(Spec, "keyExtractor")) {
-            const decl_ty = @TypeOf(Spec.keyExtractor);
-            if (decl_ty == []const u8) break :blk Spec.keyExtractor;
-            if (@typeInfo(decl_ty) == .@"fn") break :blk Spec.keyExtractor();
-        }
-        break :blk "";
-    };
-
     const Adapter = struct {
         pub fn isDefault(_: @This(), value: KArr) bool {
             return value.values.len == 0;
@@ -1131,10 +1125,19 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
             return KArr.init(alloc, items);
         }
 
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!TypeDescriptor {
-            const item_td = try allocator.create(TypeDescriptor);
-            item_td.* = try ivt.typeDescriptorFn(allocator);
-            return TypeDescriptor{ .array = .{ .item_type = item_td, .key_extractor = key_extractor_name } };
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+            const key_extractor_name = comptime blk: {
+                if (@hasDecl(Spec, "keyExtractor")) {
+                    const decl_ty = @TypeOf(Spec.keyExtractor);
+                    if (decl_ty == []const u8) break :blk Spec.keyExtractor;
+                    if (@typeInfo(decl_ty) == .@"fn") break :blk Spec.keyExtractor();
+                }
+                break :blk "";
+            };
+            const item_ptr = try ivt.typeDescriptorFn(allocator, descriptors);
+            const result = try allocator.create(TypeDescriptor);
+            result.* = TypeDescriptor{ .array = .{ .item_type = item_ptr, .key_extractor = key_extractor_name } };
+            return result;
         }
     };
 

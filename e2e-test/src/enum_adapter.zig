@@ -41,7 +41,7 @@ pub fn EnumAdapter(comptime T: type) type {
             encode_value_fn: *const fn (*const anyopaque, std.mem.Allocator, *const T, *std.ArrayList(u8)) anyerror!void,
             wrap_decode_fn: *const fn (*const anyopaque, std.mem.Allocator, *[]const u8, bool) anyerror!T,
             wrap_default_fn: *const fn (*const anyopaque) ?T,
-            variant_type_fn: *const fn (*const anyopaque, std.mem.Allocator) anyerror!?td.TypeDescriptor,
+            variant_type_fn: *const fn (*const anyopaque, std.mem.Allocator, *td.TypeDescriptorMap) anyerror!?*td.TypeDescriptor,
         };
 
         allocator: std.mem.Allocator,
@@ -58,7 +58,6 @@ pub fn EnumAdapter(comptime T: type) type {
         name_to_kind_ordinal: std.StringHashMap(usize),
         kind_ordinal_to_entry: std.ArrayList(?VariantEntry),
         desc_variants: std.ArrayList(td.EnumVariant),
-        descriptor_in_progress: bool,
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -85,7 +84,6 @@ pub fn EnumAdapter(comptime T: type) type {
                 .name_to_kind_ordinal = std.StringHashMap(usize).init(allocator),
                 .kind_ordinal_to_entry = kind_entries,
                 .desc_variants = .empty,
-                .descriptor_in_progress = false,
             };
         }
 
@@ -189,7 +187,7 @@ pub fn EnumAdapter(comptime T: type) type {
                     return ctx.instance;
                 }
 
-                fn variantType(_: *const anyopaque, _: std.mem.Allocator) anyerror!?td.TypeDescriptor {
+                fn variantType(_: *const anyopaque, _: std.mem.Allocator, _: *td.TypeDescriptorMap) anyerror!?*td.TypeDescriptor {
                     return null;
                 }
             };
@@ -313,9 +311,9 @@ pub fn EnumAdapter(comptime T: type) type {
                     return ctx.wrap(inner);
                 }
 
-                fn variantType(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator) anyerror!?td.TypeDescriptor {
+                fn variantType(ctx_ptr: *const anyopaque, allocator: std.mem.Allocator, descriptors: *td.TypeDescriptorMap) anyerror!?*td.TypeDescriptor {
                     const ctx: *const Ctx = @ptrCast(@alignCast(ctx_ptr));
-                    return try ctx.ser._vtable.typeDescriptorFn(allocator);
+                    return try ctx.ser._vtable.typeDescriptorFn(allocator, descriptors);
                 }
             };
 
@@ -394,22 +392,22 @@ pub fn EnumAdapter(comptime T: type) type {
             }.lessThan);
         }
 
-        pub fn descriptor(self: *const Self) !td.EnumDescriptor {
-            const self_mut: *Self = @constCast(self);
-            if (self_mut.descriptor_in_progress) {
-                const removed_skeleton = try self.allocator.dupe(i32, self.removed_numbers.items);
-                return .{
-                    .name = shortName(self.qualified_name),
-                    .qualified_name = self.qualified_name,
-                    .module_path = self.module_path,
-                    .doc = self.doc,
-                    .variants = &[_]td.EnumVariant{},
-                    .removed_numbers = removed_skeleton,
-                };
+        pub fn descriptor(self: *const Self, descriptors: *td.TypeDescriptorMap) !*td.TypeDescriptor {
+            if (descriptors.get(self.qualified_name)) |existing_ptr| {
+                return existing_ptr;
             }
 
-            self_mut.descriptor_in_progress = true;
-            defer self_mut.descriptor_in_progress = false;
+            const skeleton_removed = try self.allocator.dupe(i32, self.removed_numbers.items);
+            const descriptor_ptr = try self.allocator.create(td.TypeDescriptor);
+            descriptor_ptr.* = .{ .enum_record = .{
+                .name = shortName(self.qualified_name),
+                .qualified_name = self.qualified_name,
+                .module_path = self.module_path,
+                .doc = self.doc,
+                .variants = &[_]td.EnumVariant{},
+                .removed_numbers = skeleton_removed,
+            } };
+            try descriptors.put(self.qualified_name, descriptor_ptr);
 
             const variants = try self.allocator.alloc(td.EnumVariant, self.desc_variants.items.len);
             for (self.desc_variants.items, 0..) |v, idx| {
@@ -428,10 +426,7 @@ pub fn EnumAdapter(comptime T: type) type {
                                 .wrapper => |kind_ordinal| {
                                     if (kind_ordinal < self.kind_ordinal_to_entry.items.len) {
                                         if (self.kind_ordinal_to_entry.items[kind_ordinal]) |entry| {
-                                            const variant_td = (try entry.variant_type_fn(entry.ctx, self.allocator)) orelse unreachable;
-                                            const ptr = try self.allocator.create(td.TypeDescriptor);
-                                            ptr.* = variant_td;
-                                            vt_ptr = ptr;
+                                            vt_ptr = try entry.variant_type_fn(entry.ctx, self.allocator, descriptors);
                                         }
                                     }
                                 },
@@ -449,7 +444,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 }
             }
             const removed = try self.allocator.dupe(i32, self.removed_numbers.items);
-            return .{
+            const full: td.EnumDescriptor = .{
                 .name = shortName(self.qualified_name),
                 .qualified_name = self.qualified_name,
                 .module_path = self.module_path,
@@ -457,6 +452,8 @@ pub fn EnumAdapter(comptime T: type) type {
                 .variants = variants,
                 .removed_numbers = removed,
             };
+            descriptor_ptr.* = .{ .enum_record = full };
+            return descriptor_ptr;
         }
 
         pub fn isDefault(self: *const Self, input: *const T) bool {
@@ -840,8 +837,9 @@ pub fn EnumAdapter(comptime T: type) type {
             return T.unknown;
         }
 
-        pub fn typeDescriptor(self: *const Self) anyerror!td.TypeDescriptor {
-            return .{ .enum_record = try self.descriptor() };
+        pub fn typeDescriptor(self: *const Self, allocator: std.mem.Allocator, descriptors: *td.TypeDescriptorMap) anyerror!*td.TypeDescriptor {
+            _ = allocator;
+            return self.descriptor(descriptors);
         }
 
         fn shortName(qualified_name: []const u8) []const u8 {
@@ -875,9 +873,8 @@ pub fn enumSerializerFromStatic(comptime T: type, comptime get_adapter: *const f
             return get_adapter().decode(allocator, input, keep_unrecognized);
         }
 
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator) anyerror!td.TypeDescriptor {
-            _ = allocator;
-            return get_adapter().typeDescriptor();
+        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *td.TypeDescriptorMap) anyerror!*td.TypeDescriptor {
+            return get_adapter().typeDescriptor(allocator, descriptors);
         }
     };
 
