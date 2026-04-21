@@ -687,5 +687,5 @@ pub fn structSerializerFromStatic(comptime T: type, comptime get_adapter: *const
         }
     };
 
-    return s.Serializer(T).fromAdapter(Impl);
+    return s._serializerFromAdapter(T, Impl);
 }

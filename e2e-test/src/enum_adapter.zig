@@ -877,5 +877,5 @@ pub fn enumSerializerFromStatic(comptime T: type, comptime get_adapter: *const f
         }
     };
 
-    return s.Serializer(T).fromAdapter(Impl);
+    return s._serializerFromAdapter(T, Impl);
 }

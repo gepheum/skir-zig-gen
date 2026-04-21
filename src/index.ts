@@ -1,9 +1,5 @@
-// TODO: think about what to expose... use internal as much as possible
-// TODO: understand how recursive type descriptor actually work...
-// TODO: story around recursive?
 // TODO: comments
 // TODO: Service and ServiceClient
-// TODO: You should not use the qualified _name as the map key in typeDescriptor, you should use the recordId; see the definition in type_descriptor.zig, it's basically a combination of the module path and the qualified name.
 import {
   unquoteAndUnescape,
   type CodeGenerator,
@@ -344,17 +340,17 @@ class ZigSourceFileGenerator {
 
     this.push(`\n`);
 
-    this.push(`fn _adapter() *skir_client.StructAdapter(@This()) {\n`);
+    this.push(`fn _adapter() *skir_client._StructAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
     this.push(`const Holder = struct {\n`);
     this.push(`var state: u8 = 0;\n`);
-    this.push(`var adapter: skir_client.StructAdapter(S) = undefined;\n`);
+    this.push(`var adapter: skir_client._StructAdapter(S) = undefined;\n`);
     this.push(`};\n`);
     this.push(`_serializer_init_mutex.lock();\n`);
     this.push(`defer _serializer_init_mutex.unlock();\n`);
     this.push(`if (Holder.state != 0) return &Holder.adapter;\n`);
     this.push(`Holder.state = 1;\n`);
-    this.push(`Holder.adapter = skir_client.StructAdapter(S).init(\n`);
+    this.push(`Holder.adapter = skir_client._StructAdapter(S).init(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
     this.push(`${toZigStringLiteral(qualifiedName)},\n`);
@@ -424,7 +420,7 @@ class ZigSourceFileGenerator {
       `fn _maybeInitializingSerializer() skir_client.Serializer(@This()) {\n`,
     );
     this.push(
-      `return skir_client.structSerializerFromStatic(@This(), @This()._adapter);\n`,
+      `return skir_client._structSerializerFromStatic(@This(), @This()._adapter);\n`,
     );
     this.push(`}\n`);
   }
@@ -442,17 +438,17 @@ class ZigSourceFileGenerator {
 
     this.push(`\n`);
 
-    this.push(`fn _adapter() *skir_client.EnumAdapter(@This()) {\n`);
+    this.push(`fn _adapter() *skir_client._EnumAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
     this.push(`const Holder = struct {\n`);
     this.push(`var state: u8 = 0;\n`);
-    this.push(`var adapter: skir_client.EnumAdapter(S) = undefined;\n`);
+    this.push(`var adapter: skir_client._EnumAdapter(S) = undefined;\n`);
     this.push(`};\n`);
     this.push(`_serializer_init_mutex.lock();\n`);
     this.push(`defer _serializer_init_mutex.unlock();\n`);
     this.push(`if (Holder.state != 0) return &Holder.adapter;\n`);
     this.push(`Holder.state = 1;\n`);
-    this.push(`Holder.adapter = skir_client.EnumAdapter(S).init(\n`);
+    this.push(`Holder.adapter = skir_client._EnumAdapter(S).init(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
     this.push(`${toZigStringLiteral(qualifiedName)},\n`);
@@ -541,7 +537,7 @@ class ZigSourceFileGenerator {
       `fn _maybeInitializingSerializer() skir_client.Serializer(@This()) {\n`,
     );
     this.push(
-      `return skir_client.enumSerializerFromStatic(@This(), @This()._adapter);\n`,
+      `return skir_client._enumSerializerFromStatic(@This(), @This()._adapter);\n`,
     );
     this.push(`}\n`);
   }

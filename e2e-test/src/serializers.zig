@@ -14,6 +14,7 @@ const KeyedArray = @import("keyed_array.zig").KeyedArray;
 
 const SerializeFormat = base_serializer.SerializeFormat;
 const Serializer = base_serializer.Serializer;
+const _serializerFromAdapter = base_serializer._serializerFromAdapter;
 const PrimitiveType = type_descriptor.PrimitiveType;
 const ArrayDescriptor = type_descriptor.ArrayDescriptor;
 const StructField = type_descriptor.StructField;
@@ -42,7 +43,7 @@ const writeJsonEscapedString = decode_utils.writeJsonEscapedString;
 /// Dense JSON:    "1" (true) / "0" (false)
 /// Readable JSON: "true" / "false"
 /// Wire encoding: single byte 0x01 (true) / 0x00 (false)
-pub const BoolAdapter = struct {
+const BoolAdapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: bool) bool {
@@ -115,7 +116,7 @@ fn encodeI32(v: i32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anye
 ///
 /// JSON (both dense and readable): a plain JSON number.
 /// Wire encoding: variable-length signed integer.
-pub const Int32Adapter = struct {
+const Int32Adapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: i32) bool {
@@ -171,7 +172,7 @@ const max_safe_int64_json: i64 = 9_007_199_254_740_991;
 ///
 /// Dense/readable JSON: number if within JS safe integer range, else quoted string.
 /// Wire encoding: variable-length; falls back to i32 encoding if value fits.
-pub const Int64Adapter = struct {
+const Int64Adapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: i64) bool {
@@ -227,7 +228,7 @@ const max_safe_hash64_json: u64 = 9_007_199_254_740_991;
 ///
 /// Dense/readable JSON: number if within JS safe integer range, else quoted string.
 /// Wire encoding: variable-length unsigned integer.
-pub const Hash64Adapter = struct {
+const Hash64Adapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: u64) bool {
@@ -347,7 +348,7 @@ fn millisToIso8601(ms_raw: i64) [24]u8 {
 /// Dense JSON:    unix millis as a plain JSON number.
 /// Readable JSON: `{"unix_millis": N, "formatted": "<ISO-8601>"}`.
 /// Wire encoding: millis == 0 → wire 0x00; else wire 0xEF (239) + i64 LE.
-pub const TimestampAdapter = struct {
+const TimestampAdapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: Timestamp) bool {
@@ -447,7 +448,7 @@ fn floatSpecialString(f: f64) []const u8 {
 /// Dense/readable JSON: finite values as shortest round-trip decimal; NaN/±Inf
 /// as quoted strings `"NaN"`, `"Infinity"`, `"-Infinity"`.
 /// Wire encoding: 0.0 → wire 0; else wire 240 + f32 bits as 4 LE bytes.
-pub const Float32Adapter = struct {
+const Float32Adapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: f32) bool {
@@ -508,7 +509,7 @@ pub const Float32Adapter = struct {
 /// Dense/readable JSON: finite values as shortest round-trip decimal; NaN/±Inf
 /// as quoted strings `"NaN"`, `"Infinity"`, `"-Infinity"`.
 /// Wire encoding: 0.0 → wire 0; else wire 241 + f64 bits as 8 LE bytes.
-pub const Float64Adapter = struct {
+const Float64Adapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: f64) bool {
@@ -602,7 +603,7 @@ fn utf8LossyDupe(bytes: []const u8, allocator: std.mem.Allocator) ![]u8 {
 ///
 /// Dense/readable JSON: a JSON string literal with escaping (same in both modes).
 /// Wire encoding: empty → wire 242; non-empty → wire 243 + encodeUint32(len) + UTF-8 bytes.
-pub const StringAdapter = struct {
+const StringAdapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: []const u8) bool {
@@ -654,32 +655,32 @@ pub const StringAdapter = struct {
 
 /// Returns a `Serializer` for `bool` values.
 pub fn boolSerializer() Serializer(bool) {
-    return Serializer(bool).fromAdapter(BoolAdapter);
+    return _serializerFromAdapter(bool, BoolAdapter);
 }
 
 pub fn int32Serializer() Serializer(i32) {
-    return Serializer(i32).fromAdapter(Int32Adapter);
+    return _serializerFromAdapter(i32, Int32Adapter);
 }
 pub fn int64Serializer() Serializer(i64) {
-    return Serializer(i64).fromAdapter(Int64Adapter);
+    return _serializerFromAdapter(i64, Int64Adapter);
 }
 pub fn hash64Serializer() Serializer(u64) {
-    return Serializer(u64).fromAdapter(Hash64Adapter);
+    return _serializerFromAdapter(u64, Hash64Adapter);
 }
 pub fn float32Serializer() Serializer(f32) {
-    return Serializer(f32).fromAdapter(Float32Adapter);
+    return _serializerFromAdapter(f32, Float32Adapter);
 }
 pub fn float64Serializer() Serializer(f64) {
-    return Serializer(f64).fromAdapter(Float64Adapter);
+    return _serializerFromAdapter(f64, Float64Adapter);
 }
 pub fn stringSerializer() Serializer([]const u8) {
-    return Serializer([]const u8).fromAdapter(StringAdapter);
+    return _serializerFromAdapter([]const u8, StringAdapter);
 }
 pub fn bytesSerializer() Serializer([]const u8) {
-    return Serializer([]const u8).fromAdapter(BytesAdapter);
+    return _serializerFromAdapter([]const u8, BytesAdapter);
 }
 pub fn timestampSerializer() Serializer(Timestamp) {
-    return Serializer(Timestamp).fromAdapter(TimestampAdapter);
+    return _serializerFromAdapter(Timestamp, TimestampAdapter);
 }
 
 // =============================================================================
@@ -768,7 +769,7 @@ fn decodeHex(s: []const u8, allocator: std.mem.Allocator) ![]u8 {
 /// Dense JSON:    standard base64 with `=` padding.
 /// Readable JSON: `"hex:<lowercase-hex>"`.
 /// Wire:  empty → 0xF4; non-empty → 0xF5 + encodeUint32(len) + raw bytes.
-pub const BytesAdapter = struct {
+const BytesAdapter = struct {
     const Self = @This();
 
     pub fn isDefault(_: Self, input: []const u8) bool {
@@ -878,7 +879,7 @@ pub fn optionalSerializer(comptime inner: anytype) Serializer(?@TypeOf(inner).Va
         }
     };
 
-    return Serializer(?T).fromAdapter(Adapter);
+    return _serializerFromAdapter(?T, Adapter);
 }
 
 pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(@import("recursive.zig").Recursive(T)) {
@@ -927,7 +928,7 @@ pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Seri
         }
     };
 
-    return Serializer(Recursive).fromAdapter(Adapter);
+    return _serializerFromAdapter(Recursive, Adapter);
 }
 
 pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(*const T) {
@@ -964,7 +965,7 @@ pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serial
         }
     };
 
-    return Serializer(*const T).fromAdapter(Adapter);
+    return _serializerFromAdapter(*const T, Adapter);
 }
 
 /// Returns a serializer for slice values of type `[]const T`.
@@ -1047,7 +1048,7 @@ pub fn arraySerializer(comptime inner: anytype) Serializer([]const @TypeOf(inner
         }
     };
 
-    return Serializer([]const T).fromAdapter(Adapter);
+    return _serializerFromAdapter([]const T, Adapter);
 }
 
 /// Returns a serializer for keyed arrays (`KeyedArray(Spec)`).
@@ -1141,7 +1142,7 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
         }
     };
 
-    return Serializer(KArr).fromAdapter(Adapter);
+    return _serializerFromAdapter(KArr, Adapter);
 }
 
 // Duplicated Method/TypeDescriptor symbols are intentionally sourced from

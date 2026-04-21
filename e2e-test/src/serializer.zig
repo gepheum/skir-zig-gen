@@ -19,6 +19,18 @@ pub const SerializeFormat = enum {
     binary,
 };
 
+/// Internal generic vtable type used by `Serializer(T)`.
+pub fn _SerializerVTable(comptime T: type) type {
+    return struct {
+        isDefaultFn: *const fn (T) bool,
+        toJsonFn: *const fn (std.mem.Allocator, T, ?[]const u8, *std.ArrayList(u8)) anyerror!void,
+        fromJsonFn: *const fn (std.mem.Allocator, std.json.Value, bool) anyerror!T,
+        encodeFn: *const fn (std.mem.Allocator, T, *std.ArrayList(u8)) anyerror!void,
+        decodeFn: *const fn (std.mem.Allocator, *[]const u8, bool) anyerror!T,
+        typeDescriptorFn: *const fn (std.mem.Allocator, *TypeDescriptorMap) anyerror!*TypeDescriptor,
+    };
+}
+
 // =============================================================================
 // Serializer
 // =============================================================================
@@ -35,17 +47,7 @@ pub fn Serializer(comptime T: type) type {
         const Self = @This();
         pub const Value = T;
 
-        // Each concrete adapter is a zero-size struct, so all behaviour is
-        // comptime-constant. The vtable holds plain function pointers with no
-        // runtime context pointer.
-        pub const VTable = struct {
-            isDefaultFn: *const fn (T) bool,
-            toJsonFn: *const fn (std.mem.Allocator, T, ?[]const u8, *std.ArrayList(u8)) anyerror!void,
-            fromJsonFn: *const fn (std.mem.Allocator, std.json.Value, bool) anyerror!T,
-            encodeFn: *const fn (std.mem.Allocator, T, *std.ArrayList(u8)) anyerror!void,
-            decodeFn: *const fn (std.mem.Allocator, *[]const u8, bool) anyerror!T,
-            typeDescriptorFn: *const fn (std.mem.Allocator, *TypeDescriptorMap) anyerror!*TypeDescriptor,
-        };
+        const VTable = _SerializerVTable(T);
 
         fn vtableFor(comptime Impl: type) *const VTable {
             return &struct {
@@ -112,12 +114,6 @@ pub fn Serializer(comptime T: type) type {
 
         _vtable: *const VTable = vtableFor(StubImpl),
 
-        /// Constructs a `Serializer` backed by the given adapter implementation.
-        /// For use only by primitive/composite serializer factory functions.
-        pub fn fromAdapter(comptime Impl: type) Self {
-            return .{ ._vtable = vtableFor(Impl) };
-        }
-
         // ── Public API ────────────────────────────────────────────────────────
 
         /// Serializes `value` to the requested format.
@@ -164,6 +160,11 @@ pub fn Serializer(comptime T: type) type {
             return ptr.*;
         }
     };
+}
+
+/// Internal helper that constructs a `Serializer(T)` backed by `Impl`.
+pub fn _serializerFromAdapter(comptime T: type, comptime Impl: type) Serializer(T) {
+    return .{ ._vtable = Serializer(T).vtableFor(Impl) };
 }
 
 // =============================================================================
