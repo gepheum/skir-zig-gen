@@ -199,6 +199,7 @@ class ZigSourceFileGenerator {
     this.push(
       `_unrecognized: ?skir_client.UnrecognizedFields(@This()) = null,\n`,
     );
+    this.push(`\n`);
     this.push(`pub const default: @This() = .{\n`);
     for (const field of loc.record.fields) {
       if (field.isRecursive !== false) {
@@ -219,10 +220,12 @@ class ZigSourceFileGenerator {
     );
     if (recursiveFields.length > 0) {
       for (const field of recursiveFields) {
+        this.push(`\n`);
         this.writeRecursiveFieldGetter(field);
       }
     }
 
+    this.push(`\n`);
     this.writeStructSerializer(loc, typeName);
 
     this.push(`};\n`);
@@ -256,10 +259,12 @@ class ZigSourceFileGenerator {
       this.push(`};\n`);
     }
 
+    this.push(`\n`);
     this.push(
       `pub const default: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n`,
     );
     if (emitKindEnum) {
+      this.push(`\n`);
       this.push(`pub fn kind(self: @This()) Kind {\n`);
       this.push(`return switch (self) {\n`);
       this.push(
@@ -289,6 +294,7 @@ class ZigSourceFileGenerator {
       }
     }
 
+    this.push(`\n`);
     this.writeEnumSerializer(loc, typeName);
 
     this.push(`};\n`);
@@ -328,6 +334,16 @@ class ZigSourceFileGenerator {
 
   private writeStructSerializer(loc: RecordLocation, _typeName: string): void {
     const qualifiedName = loc.recordAncestors.map((x) => x.name.text).join(".");
+
+    this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
+    this.push(
+      `if (@inComptime()) return @This()._maybeInitializingSerializer();\n`,
+    );
+    this.push(`_ = @This()._adapter();\n`);
+    this.push(`return @This()._maybeInitializingSerializer();\n`);
+    this.push(`}\n`);
+
+    this.push(`\n`);
 
     this.push(`fn _adapter() *skir_client.StructAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
@@ -404,6 +420,7 @@ class ZigSourceFileGenerator {
     this.push(`return &Holder.adapter;\n`);
     this.push(`}\n`);
 
+    this.push(`\n`);
     this.push(
       `fn _maybeInitializingSerializer() skir_client.Serializer(@This()) {\n`,
     );
@@ -411,6 +428,10 @@ class ZigSourceFileGenerator {
       `return skir_client.structSerializerFromStatic(@This(), @This()._adapter);\n`,
     );
     this.push(`}\n`);
+  }
+
+  private writeEnumSerializer(loc: RecordLocation, _typeName: string): void {
+    const qualifiedName = loc.recordAncestors.map((x) => x.name.text).join(".");
 
     this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
     this.push(
@@ -419,10 +440,8 @@ class ZigSourceFileGenerator {
     this.push(`_ = @This()._adapter();\n`);
     this.push(`return @This()._maybeInitializingSerializer();\n`);
     this.push(`}\n`);
-  }
 
-  private writeEnumSerializer(loc: RecordLocation, _typeName: string): void {
-    const qualifiedName = loc.recordAncestors.map((x) => x.name.text).join(".");
+    this.push(`\n`);
 
     this.push(`fn _adapter() *skir_client.EnumAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
@@ -518,20 +537,13 @@ class ZigSourceFileGenerator {
     this.push(`return &Holder.adapter;\n`);
     this.push(`}\n`);
 
+    this.push(`\n`);
     this.push(
       `fn _maybeInitializingSerializer() skir_client.Serializer(@This()) {\n`,
     );
     this.push(
       `return skir_client.enumSerializerFromStatic(@This(), @This()._adapter);\n`,
     );
-    this.push(`}\n`);
-
-    this.push(`pub fn serializer() skir_client.Serializer(@This()) {\n`);
-    this.push(
-      `if (@inComptime()) return @This()._maybeInitializingSerializer();\n`,
-    );
-    this.push(`_ = @This()._adapter();\n`);
-    this.push(`return @This()._maybeInitializingSerializer();\n`);
     this.push(`}\n`);
   }
 
@@ -934,7 +946,7 @@ class ZigSourceFileGenerator {
     let result = "";
     // The indent at every line is obtained by repeating indentUnit N times,
     // where N is the length of this array.
-    const contextStack: Array<"{" | "(" | "[" | "<" | ":" | "."> = [];
+    const contextStack: Array<"{" | "(" | "[" | "<" | ":"> = [];
     // Returns the last element in `contextStack`.
     const peakTop = (): string | undefined =>
       contextStack[contextStack.length - 1];
@@ -969,12 +981,6 @@ class ZigSourceFileGenerator {
             if (contextStack.length <= 0) {
               throw Error();
             }
-          }
-          break;
-        }
-        case ".": {
-          if (peakTop() !== ".") {
-            contextStack.push(".");
           }
           break;
         }
