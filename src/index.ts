@@ -1,6 +1,7 @@
 // TODO: formatting, better end of lines, use the format thing to not worry about indent.
 // TODO: move readUint8 to decode_utils
 // TODO: move TypeDescriptor out of serializer.zig
+// TODO: optimzie things?
 // TODO: make unrecognized_fields generic
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
 // TODO: deduplicate serializer... defined both in serializers and serializer

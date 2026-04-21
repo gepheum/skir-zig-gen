@@ -47,6 +47,34 @@ pub fn decodeNumber(input: *[]const u8) error{UnexpectedEndOfInput}!i64 {
     return decodeNumberBody(wire, input);
 }
 
+/// Encodes an `i32` using the skir variable-length wire format.
+pub fn encodeI32(v: i32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
+    if (v >= std.math.minInt(i32) and v <= -65537) {
+        try out.append(allocator, 237);
+        try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(i32, v)));
+    } else if (v >= -65536 and v <= -257) {
+        try out.append(allocator, 236);
+        try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u16, @intCast(v + 65536))));
+    } else if (v >= -256 and v <= -1) {
+        try out.append(allocator, 235);
+        try out.append(allocator, @as(u8, @intCast(v + 256)));
+    } else if (v >= 0 and v <= 231) {
+        try out.append(allocator, @intCast(v));
+    } else if (v >= 232 and v <= 65535) {
+        try out.append(allocator, 232);
+        try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u16, @intCast(v))));
+    } else {
+        try out.append(allocator, 233);
+        try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToLittle(u32, @bitCast(v))));
+    }
+}
+
+/// Encodes a non-negative integer as a variable-length unsigned value used for
+/// array lengths and string/bytes sizes.
+///
+///  0..=231   → single byte equal to the value
+///  232..=65535 → wire 232 + u16 LE
+///  else      → wire 233 + u32 LE
 pub fn encodeUint32(n: u32, allocator: std.mem.Allocator, out: *std.ArrayList(u8)) anyerror!void {
     if (n <= 231) {
         try out.append(allocator, @intCast(n));
