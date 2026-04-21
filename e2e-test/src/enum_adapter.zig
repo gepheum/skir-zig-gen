@@ -13,10 +13,6 @@ const decodeNumberBody = decode_utils.decodeNumberBody;
 const decodeNumber = decode_utils.decodeNumber;
 const encodeUint32 = decode_utils.encodeUint32;
 
-/// Type-erased enum adapter modeled after skir-rust-client EnumAdapter.
-///
-/// Note: like StructAdapter, this is currently standalone because Serializer
-/// in serializer.zig cannot hold a runtime adapter context pointer.
 pub fn EnumAdapter(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -47,6 +43,7 @@ pub fn EnumAdapter(comptime T: type) type {
         allocator: std.mem.Allocator,
         module_path: []const u8,
         qualified_name: []const u8,
+        record_id: []const u8,
         doc: []const u8,
 
         get_kind_ordinal: *const fn (*const T) usize,
@@ -75,6 +72,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 .allocator = allocator,
                 .module_path = try allocator.dupe(u8, module_path),
                 .qualified_name = try allocator.dupe(u8, qualified_name),
+                .record_id = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ module_path, qualified_name }),
                 .doc = try allocator.dupe(u8, doc),
                 .get_kind_ordinal = get_kind_ordinal,
                 .wrap_unrecognized = wrap_unrecognized,
@@ -122,6 +120,7 @@ pub fn EnumAdapter(comptime T: type) type {
 
             self.allocator.free(self.module_path);
             self.allocator.free(self.qualified_name);
+            self.allocator.free(self.record_id);
             self.allocator.free(self.doc);
         }
 
@@ -393,7 +392,7 @@ pub fn EnumAdapter(comptime T: type) type {
         }
 
         pub fn descriptor(self: *const Self, descriptors: *td.TypeDescriptorMap) !*td.TypeDescriptor {
-            if (descriptors.get(self.qualified_name)) |existing_ptr| {
+            if (descriptors.get(self.record_id)) |existing_ptr| {
                 return existing_ptr;
             }
 
@@ -407,7 +406,7 @@ pub fn EnumAdapter(comptime T: type) type {
                 .variants = &[_]td.EnumVariant{},
                 .removed_numbers = skeleton_removed,
             } };
-            try descriptors.put(self.qualified_name, descriptor_ptr);
+            try descriptors.put(self.record_id, descriptor_ptr);
 
             const variants = try self.allocator.alloc(td.EnumVariant, self.desc_variants.items.len);
             for (self.desc_variants.items, 0..) |v, idx| {

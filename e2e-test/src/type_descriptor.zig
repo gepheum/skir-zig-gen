@@ -181,9 +181,7 @@ pub const TypeDescriptorMap = std.StringHashMap(*TypeDescriptor);
 /// Serializes a `TypeDescriptor` to a pretty-printed JSON string.
 ///
 /// The returned slice is allocated with `allocator` and must be freed by the
-/// caller.  The format is byte-for-byte compatible with the Rust
-/// `skir-client` crate's `TypeDescriptor::as_json()` output so that type
-/// descriptors can be exchanged between language runtimes.
+/// caller.
 pub fn typeDescriptorToJson(allocator: std.mem.Allocator, td: TypeDescriptor) ![]const u8 {
     var records_list = std.ArrayList(RecordEntry){};
     defer records_list.deinit(allocator);
