@@ -20,6 +20,7 @@ enum JsonValue {
   struct Pair {
     name: string = 0;
     value: JsonValue = 1;
+    struct Kind {}
   }
   object: [Pair|name] = 5;
 }
@@ -75,4 +76,10 @@ enum Status {
     message: string;
   }
   error: Error;
+}
+
+struct Foo {
+  kind: string;
+  struct Kind {}
+  foos: [Foo|kind];
 }

@@ -1,7 +1,4 @@
-// TODO: add tempo conversion method to timestamp.zig
 // TODO: optimzie things?
-// TODO: look at what happens with recursive type where T owns a T?
-// TODO: run test with config=asan...
 // TODO: name conflict between generated variant names and subtypes, or even Kind...
 // TODO: do not expose the adapter, only expose the serializer?
 import {
@@ -1027,7 +1024,7 @@ class ZigSourceFileGenerator {
         // Remove spaces enclosed within square brackets if that's all there is.
         .replace(/\[\s+\]/g, "[]")
         // Remove empty line following an open curly bracket.
-        .replace(/(\{\n *)/g, "$1")
+        .replace(/(\{\n *)\n/g, "$1")
         // Remove empty line preceding a closed curly bracket.
         .replace(/\n(\n *\})/g, "$1")
         // Coalesce consecutive empty lines.
