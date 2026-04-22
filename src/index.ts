@@ -1,10 +1,10 @@
 // TODO: comments
-// TODO: Service and ServiceClient
 import {
   unquoteAndUnescape,
   type CodeGenerator,
   type Constant,
   type Field,
+  type Method,
   type Module,
   type Record,
   type RecordKey,
@@ -20,6 +20,7 @@ import {
   modulePathToOutputPath,
   toConstantName,
   toFieldGetterName,
+  toMethodFnName,
   toStructFieldName,
   toVariantName,
 } from "./naming.js";
@@ -102,6 +103,14 @@ class ZigSourceFileGenerator {
         this.collectTypeImports(constant.type);
       }
     }
+    for (const method of inModule.methods) {
+      if (method.requestType) {
+        this.collectTypeImports(method.requestType);
+      }
+      if (method.responseType) {
+        this.collectTypeImports(method.responseType);
+      }
+    }
   }
 
   generate(): string {
@@ -130,6 +139,13 @@ class ZigSourceFileGenerator {
       this.push("\n");
       for (const constant of this.inModule.constants) {
         this.writeConstant(constant);
+      }
+    }
+
+    if (this.inModule.methods.length > 0) {
+      this.push("\n");
+      for (const method of this.inModule.methods) {
+        this.writeMethod(method);
       }
     }
 
@@ -681,6 +697,28 @@ class ZigSourceFileGenerator {
     this.push(`Holder.initialized = true;\n`);
     this.push(`}\n`);
     this.push(`return &Holder.value;\n`);
+    this.push(`}\n\n`);
+  }
+
+  private writeMethod(method: Method): void {
+    if (!method.requestType || !method.responseType) return;
+    const fnName = toMethodFnName(method.name.text);
+    const requestType = this.typeSpeller.getZigType(method.requestType);
+    const responseType = this.typeSpeller.getZigType(method.responseType);
+    const requestSerializer = this.getSerializerExpr(method.requestType);
+    const responseSerializer = this.getSerializerExpr(method.responseType);
+    const doc = docToCommentText(method.doc);
+    this.push(commentify(doc));
+    this.push(
+      `pub fn ${fnName}() skir_client.Method(${requestType}, ${responseType}) {\n`,
+    );
+    this.push(`return .{\n`);
+    this.push(`.name = ${toZigStringLiteral(method.name.text)},\n`);
+    this.push(`.number = ${method.number},\n`);
+    this.push(`.doc = ${toZigStringLiteral(doc)},\n`);
+    this.push(`.request_serializer = ${requestSerializer},\n`);
+    this.push(`.response_serializer = ${responseSerializer},\n`);
+    this.push(`};\n`);
     this.push(`}\n\n`);
   }
 

@@ -2,6 +2,8 @@ const core = @import("serializer.zig");
 const enum_adapter = @import("enum_adapter.zig");
 const keyed_array = @import("keyed_array.zig");
 const recursive = @import("recursive.zig");
+const service = @import("service.zig");
+const service_client = @import("service_client.zig");
 const serializers = @import("serializers.zig");
 const struct_adapter = @import("struct_adapter.zig");
 const timestamp = @import("timestamp.zig");
@@ -33,6 +35,19 @@ pub const pointerSerializer = serializers.pointerSerializer;
 pub const recursiveSerializer = serializers.recursiveSerializer;
 pub const stringSerializer = serializers.stringSerializer;
 pub const timestampSerializer = serializers.timestampSerializer;
+
+// RPC service/runtime
+pub const Header = service_client.Header;
+pub const HttpErrorCode = service.HttpErrorCode;
+pub const MethodResult = service.MethodResult;
+pub const RawResponse = service.RawResponse;
+pub const RpcError = service_client.RpcError;
+pub const RpcResult = service_client.RpcResult;
+pub const Service = service.Service;
+pub const ServiceBuilder = service.ServiceBuilder;
+pub const ServiceClient = service_client.ServiceClient;
+pub const ServiceError = service.ServiceError;
+pub const httpStatusText = service.httpStatusText;
 
 // Type descriptors
 pub const ArrayDescriptor = type_descriptor.ArrayDescriptor;

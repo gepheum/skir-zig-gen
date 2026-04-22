@@ -63,6 +63,11 @@ export function toConstantName(input: string): string {
   return RESERVED_LOWER_NAMES.has(name) ? `${name}_value` : name;
 }
 
+export function toMethodFnName(input: string): string {
+  const name = `${convertCase(input, "lower_underscore")}_method`;
+  return RESERVED_LOWER_NAMES.has(name) ? `${name}_fn` : name;
+}
+
 function getDeclaredTypeNameSegment(
   input: string,
   parentRecord: RecordLocation["record"] | null,
