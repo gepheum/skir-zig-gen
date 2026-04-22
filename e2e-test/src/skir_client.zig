@@ -44,7 +44,6 @@ pub const RawResponse = service.RawResponse;
 pub const RpcError = service_client.RpcError;
 pub const RpcResult = service_client.RpcResult;
 pub const Service = service.Service;
-pub const ServiceBuilder = service.ServiceBuilder;
 pub const ServiceClient = service_client.ServiceClient;
 pub const ServiceError = service.ServiceError;
 pub const httpStatusText = service.httpStatusText;

@@ -21,7 +21,7 @@ const UserStore = std.AutoHashMap(i32, User);
 var g_store: ?*UserStore = null;
 var g_store_mutex: std.Thread.Mutex = .{};
 
-fn get_user_impl(req: GetUserRequest, _: void) skir_client.MethodResult(GetUserResponse) {
+fn get_user_impl(_: std.mem.Allocator, req: GetUserRequest, _: void) skir_client.MethodResult(GetUserResponse) {
     const store = g_store orelse return .{ .unknown_error = "store not initialized" };
     g_store_mutex.lock();
     defer g_store_mutex.unlock();
@@ -32,7 +32,7 @@ fn get_user_impl(req: GetUserRequest, _: void) skir_client.MethodResult(GetUserR
     } };
 }
 
-fn add_user_impl(req: AddUserRequest, _: void) skir_client.MethodResult(AddUserResponse) {
+fn add_user_impl(_: std.mem.Allocator, req: AddUserRequest, _: void) skir_client.MethodResult(AddUserResponse) {
     if (req.user.user_id == 0) {
         return .{ .service_error = .{
             .status_code = ._400_BadRequest,
@@ -62,12 +62,9 @@ pub fn main() !void {
     defer store.deinit();
     g_store = &store;
 
-    var builder = try skir_client.ServiceBuilder(void).init(allocator);
-    defer builder.deinit();
-    _ = try builder.addMethod(GetUserRequest, GetUserResponse, &service_mod.get_user_method(), get_user_impl);
-    _ = try builder.addMethod(AddUserRequest, AddUserResponse, &service_mod.add_user_method(), add_user_impl);
-
-    var service = builder.build();
+    var service = try skir_client.Service(void).init(allocator);
+    _ = try service.addMethod(GetUserRequest, GetUserResponse, &service_mod.get_user_method(), get_user_impl);
+    _ = try service.addMethod(AddUserRequest, AddUserResponse, &service_mod.add_user_method(), add_user_impl);
     defer service.deinit();
 
     const addr = try std.net.Address.parseIp("127.0.0.1", 18787);

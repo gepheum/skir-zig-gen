@@ -161,6 +161,99 @@ pub fn Service(comptime Meta: type) type {
         by_num: std.AutoHashMap(i64, Entry),
         by_name: std.StringHashMap(i64),
 
+        pub fn init(allocator: std.mem.Allocator) !Self {
+            return .{
+                .allocator = allocator,
+                .keep_unrecognized_values = false,
+                .can_send_unknown_error_message_fn = defaultCanSendUnknownErrorMessage(Meta),
+                .error_logger_fn = defaultErrorLogger(Meta),
+                .studio_app_js_url = try allocator.dupe(u8, DEFAULT_STUDIO_APP_JS_URL),
+                .by_num = std.AutoHashMap(i64, Entry).init(allocator),
+                .by_name = std.StringHashMap(i64).init(allocator),
+            };
+        }
+
+        pub fn setKeepUnrecognizedValues(self: *Self, keep: bool) *Self {
+            self.keep_unrecognized_values = keep;
+            return self;
+        }
+
+        pub fn setCanSendUnknownErrorMessage(self: *Self, can: bool) *Self {
+            if (can) {
+                self.can_send_unknown_error_message_fn = alwaysTrueCanSend(Meta);
+            } else {
+                self.can_send_unknown_error_message_fn = alwaysFalseCanSend(Meta);
+            }
+            return self;
+        }
+
+        pub fn setCanSendUnknownErrorMessageFn(self: *Self, f: *const fn (*const ErrorInfo) bool) *Self {
+            self.can_send_unknown_error_message_fn = f;
+            return self;
+        }
+
+        pub fn setErrorLogger(self: *Self, logger: *const fn (*const ErrorInfo) void) *Self {
+            self.error_logger_fn = logger;
+            return self;
+        }
+
+        pub fn setStudioAppJsUrl(self: *Self, url: []const u8) !*Self {
+            self.allocator.free(self.studio_app_js_url);
+            self.studio_app_js_url = try self.allocator.dupe(u8, url);
+            return self;
+        }
+
+        pub fn addMethod(
+            self: *Self,
+            comptime Req: type,
+            comptime Resp: type,
+            comptime method: *const Method(Req, Resp),
+            comptime impl_fn: *const fn (std.mem.Allocator, Req, Meta) MethodResult(Resp),
+        ) !*Self {
+            const number: i64 = method.number;
+            if (self.by_num.contains(number)) {
+                return error.DuplicateMethodNumber;
+            }
+
+            const req_td = try method.request_serializer.typeDescriptor(self.allocator);
+            const req_td_json = try type_descriptor.typeDescriptorToJson(self.allocator, req_td);
+            const resp_td = try method.response_serializer.typeDescriptor(self.allocator);
+            const resp_td_json = try type_descriptor.typeDescriptorToJson(self.allocator, resp_td);
+
+            const entry: Entry = .{
+                .name = try self.allocator.dupe(u8, method.name),
+                .number = number,
+                .doc = try self.allocator.dupe(u8, method.doc),
+                .request_type_descriptor_json = req_td_json,
+                .response_type_descriptor_json = resp_td_json,
+                .invoke_fn = struct {
+                    fn invoke(allocator: std.mem.Allocator, request_json: []const u8, keep_unrecognized: bool, readable: bool, meta: Meta) anyerror!InvokeOutcome(Meta) {
+                        const req = serializerDeserialize(Req, method.request_serializer, allocator, request_json, keep_unrecognized) catch |err| {
+                            const msg = try std.fmt.allocPrint(allocator, "bad request: can't parse JSON: {s}", .{@errorName(err)});
+                            return .{ .service_error = .{
+                                .status_code = ._400_BadRequest,
+                                .message = msg,
+                            } };
+                        };
+
+                        switch (impl_fn(allocator, req, meta)) {
+                            .ok => |resp| {
+                                const fmt: SerializeFormat = if (readable) .readableJson else .denseJson;
+                                const response_json = try method.response_serializer.serialize(allocator, resp, .{ .format = fmt });
+                                return .{ .ok_json = response_json };
+                            },
+                            .service_error => |svc| return .{ .service_error = svc },
+                            .unknown_error => |m| return .{ .unknown_error = m },
+                        }
+                    }
+                }.invoke,
+            };
+
+            try self.by_name.put(try self.allocator.dupe(u8, method.name), number);
+            try self.by_num.put(number, entry);
+            return self;
+        }
+
         pub fn deinit(self: *Self) void {
             var by_num_it = self.by_num.iterator();
             while (by_num_it.next()) |kv| {
@@ -365,152 +458,6 @@ pub fn Service(comptime Meta: type) type {
                     return RawResponse.serverError(msg, 500);
                 },
             }
-        }
-    };
-}
-
-pub fn ServiceBuilder(comptime Meta: type) type {
-    return struct {
-        const Self = @This();
-        const Entry = MethodEntry(Meta);
-        const Svc = Service(Meta);
-        const ErrorInfo = MethodErrorInfo(Meta);
-
-        allocator: std.mem.Allocator,
-        keep_unrecognized_values: bool,
-        can_send_unknown_error_message_fn: *const fn (*const ErrorInfo) bool,
-        error_logger_fn: *const fn (*const ErrorInfo) void,
-        studio_app_js_url: []const u8,
-        by_num: std.AutoHashMap(i64, Entry),
-        by_name: std.StringHashMap(i64),
-
-        pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{
-                .allocator = allocator,
-                .keep_unrecognized_values = false,
-                .can_send_unknown_error_message_fn = defaultCanSendUnknownErrorMessage(Meta),
-                .error_logger_fn = defaultErrorLogger(Meta),
-                .studio_app_js_url = try allocator.dupe(u8, DEFAULT_STUDIO_APP_JS_URL),
-                .by_num = std.AutoHashMap(i64, Entry).init(allocator),
-                .by_name = std.StringHashMap(i64).init(allocator),
-            };
-        }
-
-        pub fn deinit(self: *Self) void {
-            var by_num_it = self.by_num.iterator();
-            while (by_num_it.next()) |kv| {
-                const e = kv.value_ptr.*;
-                self.allocator.free(e.name);
-                self.allocator.free(e.doc);
-                self.allocator.free(e.request_type_descriptor_json);
-                self.allocator.free(e.response_type_descriptor_json);
-            }
-            self.by_num.deinit();
-
-            var by_name_it = self.by_name.iterator();
-            while (by_name_it.next()) |kv| {
-                self.allocator.free(kv.key_ptr.*);
-            }
-            self.by_name.deinit();
-            self.allocator.free(self.studio_app_js_url);
-        }
-
-        pub fn setKeepUnrecognizedValues(self: *Self, keep: bool) *Self {
-            self.keep_unrecognized_values = keep;
-            return self;
-        }
-
-        pub fn setCanSendUnknownErrorMessage(self: *Self, can: bool) *Self {
-            if (can) {
-                self.can_send_unknown_error_message_fn = alwaysTrueCanSend(Meta);
-            } else {
-                self.can_send_unknown_error_message_fn = alwaysFalseCanSend(Meta);
-            }
-            return self;
-        }
-
-        pub fn setCanSendUnknownErrorMessageFn(self: *Self, f: *const fn (*const ErrorInfo) bool) *Self {
-            self.can_send_unknown_error_message_fn = f;
-            return self;
-        }
-
-        pub fn setErrorLogger(self: *Self, logger: *const fn (*const ErrorInfo) void) *Self {
-            self.error_logger_fn = logger;
-            return self;
-        }
-
-        pub fn setStudioAppJsUrl(self: *Self, url: []const u8) !*Self {
-            self.allocator.free(self.studio_app_js_url);
-            self.studio_app_js_url = try self.allocator.dupe(u8, url);
-            return self;
-        }
-
-        pub fn addMethod(
-            self: *Self,
-            comptime Req: type,
-            comptime Resp: type,
-            comptime method: *const Method(Req, Resp),
-            comptime impl_fn: *const fn (Req, Meta) MethodResult(Resp),
-        ) !*Self {
-            const number: i64 = method.number;
-            if (self.by_num.contains(number)) {
-                return error.DuplicateMethodNumber;
-            }
-
-            const req_td = try method.request_serializer.typeDescriptor(self.allocator);
-            const req_td_json = try type_descriptor.typeDescriptorToJson(self.allocator, req_td);
-            const resp_td = try method.response_serializer.typeDescriptor(self.allocator);
-            const resp_td_json = try type_descriptor.typeDescriptorToJson(self.allocator, resp_td);
-
-            const entry: Entry = .{
-                .name = try self.allocator.dupe(u8, method.name),
-                .number = number,
-                .doc = try self.allocator.dupe(u8, method.doc),
-                .request_type_descriptor_json = req_td_json,
-                .response_type_descriptor_json = resp_td_json,
-                .invoke_fn = struct {
-                    fn invoke(allocator: std.mem.Allocator, request_json: []const u8, keep_unrecognized: bool, readable: bool, meta: Meta) anyerror!InvokeOutcome(Meta) {
-                        const req = serializerDeserialize(Req, method.request_serializer, allocator, request_json, keep_unrecognized) catch |err| {
-                            const msg = try std.fmt.allocPrint(allocator, "bad request: can't parse JSON: {s}", .{@errorName(err)});
-                            return .{ .service_error = .{
-                                .status_code = ._400_BadRequest,
-                                .message = msg,
-                            } };
-                        };
-
-                        switch (impl_fn(req, meta)) {
-                            .ok => |resp| {
-                                const fmt: SerializeFormat = if (readable) .readableJson else .denseJson;
-                                const response_json = try method.response_serializer.serialize(allocator, resp, .{ .format = fmt });
-                                return .{ .ok_json = response_json };
-                            },
-                            .service_error => |svc| return .{ .service_error = svc },
-                            .unknown_error => |m| return .{ .unknown_error = m },
-                        }
-                    }
-                }.invoke,
-            };
-
-            try self.by_name.put(try self.allocator.dupe(u8, method.name), number);
-            try self.by_num.put(number, entry);
-            return self;
-        }
-
-        pub fn build(self: *Self) Svc {
-            const svc: Svc = .{
-                .allocator = self.allocator,
-                .keep_unrecognized_values = self.keep_unrecognized_values,
-                .can_send_unknown_error_message_fn = self.can_send_unknown_error_message_fn,
-                .error_logger_fn = self.error_logger_fn,
-                .studio_app_js_url = self.studio_app_js_url,
-                .by_num = self.by_num,
-                .by_name = self.by_name,
-            };
-
-            self.studio_app_js_url = &.{};
-            self.by_num = std.AutoHashMap(i64, Entry).init(self.allocator);
-            self.by_name = std.StringHashMap(i64).init(self.allocator);
-            return svc;
         }
     };
 }
