@@ -101,7 +101,7 @@ fn handleConnection(allocator: std.mem.Allocator, service: *skir_client.Service(
     const raw_response = try service.handleRequest(allocator, body_for_service, {});
     defer allocator.free(raw_response.data);
 
-    const status_text = skir_client.httpStatusText(raw_response.status_code);
+    const status_text = skir_client.rawHttpStatusText(raw_response.status_code);
     var line_buf: [128]u8 = undefined;
     const status_line = try std.fmt.bufPrint(&line_buf, "HTTP/1.1 {d} {s}\r\n", .{ raw_response.status_code, status_text });
     try stream.writeAll(status_line);

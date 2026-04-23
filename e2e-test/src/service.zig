@@ -437,7 +437,7 @@ pub fn Service(comptime Meta: type) type {
                     };
                     self.error_logger_fn(&info);
                     const msg = if (svc.message.len == 0)
-                        try allocator.dupe(u8, httpStatusText(svc.status_code.asU16()))
+                        try allocator.dupe(u8, httpStatusText(svc.status_code))
                     else
                         try allocator.dupe(u8, svc.message);
                     return RawResponse.serverError(msg, svc.status_code.asU16());
@@ -529,20 +529,55 @@ fn htmlEscapeAttr(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     return out.toOwnedSlice(allocator);
 }
 
-pub fn httpStatusText(code: u16) []const u8 {
+pub fn httpStatusText(code: HttpErrorCode) []const u8 {
+    return switch (code) {
+        ._400_BadRequest => "Bad Request",
+        ._401_Unauthorized => "Unauthorized",
+        ._402_PaymentRequired => "Payment Required",
+        ._403_Forbidden => "Forbidden",
+        ._404_NotFound => "Not Found",
+        ._405_MethodNotAllowed => "Method Not Allowed",
+        ._406_NotAcceptable => "Not Acceptable",
+        ._407_ProxyAuthenticationRequired => "Proxy Authentication Required",
+        ._408_RequestTimeout => "Request Timeout",
+        ._409_Conflict => "Conflict",
+        ._410_Gone => "Gone",
+        ._411_LengthRequired => "Length Required",
+        ._412_PreconditionFailed => "Precondition Failed",
+        ._413_ContentTooLarge => "Content Too Large",
+        ._414_UriTooLong => "URI Too Long",
+        ._415_UnsupportedMediaType => "Unsupported Media Type",
+        ._416_RangeNotSatisfiable => "Range Not Satisfiable",
+        ._417_ExpectationFailed => "Expectation Failed",
+        ._418_ImATeapot => "I'm a Teapot",
+        ._421_MisdirectedRequest => "Misdirected Request",
+        ._422_UnprocessableContent => "Unprocessable Content",
+        ._423_Locked => "Locked",
+        ._424_FailedDependency => "Failed Dependency",
+        ._425_TooEarly => "Too Early",
+        ._426_UpgradeRequired => "Upgrade Required",
+        ._428_PreconditionRequired => "Precondition Required",
+        ._429_TooManyRequests => "Too Many Requests",
+        ._431_RequestHeaderFieldsTooLarge => "Request Header Fields Too Large",
+        ._451_UnavailableForLegalReasons => "Unavailable For Legal Reasons",
+        ._500_InternalServerError => "Internal Server Error",
+        ._501_NotImplemented => "Not Implemented",
+        ._502_BadGateway => "Bad Gateway",
+        ._503_ServiceUnavailable => "Service Unavailable",
+        ._504_GatewayTimeout => "Gateway Timeout",
+        ._505_HttpVersionNotSupported => "HTTP Version Not Supported",
+        ._506_VariantAlsoNegotiates => "Variant Also Negotiates",
+        ._507_InsufficientStorage => "Insufficient Storage",
+        ._508_LoopDetected => "Loop Detected",
+        ._510_NotExtended => "Not Extended",
+        ._511_NetworkAuthenticationRequired => "Network Authentication Required",
+    };
+}
+
+pub fn rawHttpStatusText(code: u16) []const u8 {
     return switch (code) {
         200 => "OK",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        409 => "Conflict",
-        422 => "Unprocessable Entity",
-        429 => "Too Many Requests",
-        500 => "Internal Server Error",
-        502 => "Bad Gateway",
-        503 => "Service Unavailable",
-        else => "Error",
+        else => std.http.Status.phrase(@enumFromInt(code)) orelse "Error",
     };
 }
 
