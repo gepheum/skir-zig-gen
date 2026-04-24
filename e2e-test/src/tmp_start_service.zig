@@ -98,13 +98,14 @@ fn handleConnection(allocator: std.mem.Allocator, service: *skir_client.Service(
         body_for_service = try allocator.dupe(u8, req.body);
     }
 
-    const raw_response = try service.handleRequest(allocator, body_for_service, {});
-    defer allocator.free(raw_response.data);
+    var request_arena = std.heap.ArenaAllocator.init(allocator);
+    defer request_arena.deinit();
+    const request_allocator = request_arena.allocator();
 
-    const status_text = skir_client.rawHttpStatusText(raw_response.status_code);
+    const raw_response = try service.handleRequest(request_allocator, body_for_service, {});
+
+    try stream.writeAll(raw_response.status_line);
     var line_buf: [128]u8 = undefined;
-    const status_line = try std.fmt.bufPrint(&line_buf, "HTTP/1.1 {d} {s}\r\n", .{ raw_response.status_code, status_text });
-    try stream.writeAll(status_line);
     const content_type_line = try std.fmt.bufPrint(&line_buf, "Content-Type: {s}\r\n", .{raw_response.content_type});
     try stream.writeAll(content_type_line);
     const content_len_line = try std.fmt.bufPrint(&line_buf, "Content-Length: {d}\r\n", .{raw_response.data.len});

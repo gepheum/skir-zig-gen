@@ -10,12 +10,11 @@ const TypeDescriptorMap = type_descriptor.TypeDescriptorMap;
 
 /// Output format for `Serializer.serialize`.
 pub const SerializeFormat = enum {
-    /// Dense JSON: field-index-based array layout. Safe for persistent storage
-    /// and transport — renaming a field does not break deserialization.
+    /// Stable machine-oriented JSON format for transport/storage.
     denseJson,
-    /// Readable JSON: field-name-based with indentation. For debugging only.
+    /// Human-oriented JSON format intended for debugging and logs.
     readableJson,
-    /// Compact binary encoding, prefixed with the four-byte magic `"skir"`.
+    /// Compact binary format for bandwidth-sensitive communication.
     binary,
 };
 
@@ -39,6 +38,16 @@ pub fn _SerializerVTable(comptime T: type) type {
 ///
 /// Obtain instances via the factory functions (`boolSerializer`, etc.).
 /// Default-initialize one (`Serializer(MyRecord){}`) for generated record types.
+///
+/// Typical usage with generated methods:
+/// ```zig
+/// const method = service_mod.get_user_method();
+/// const req_json = try method.request_serializer.serialize(allocator, req, .{ .format = .denseJson });
+/// defer allocator.free(req_json);
+///
+/// const req_copy = try method.request_serializer.deserialize(allocator, req_json, .{});
+/// _ = req_copy;
+/// ```
 ///
 /// For primitive serializers the vtable points to comptime-generated constants,
 /// so the `Serializer` is a thin single-pointer value with no heap allocation.
@@ -120,6 +129,8 @@ pub fn Serializer(comptime T: type) type {
         ///
         /// The caller owns the returned slice and must free it with
         /// `allocator.free(result)`.
+        ///
+        /// Common mistake: forgetting to free the returned buffer in hot paths.
         pub fn serialize(self: Self, allocator: std.mem.Allocator, value: T, opts: struct {
             format: SerializeFormat = .denseJson,
         }) ![]u8 {
@@ -138,7 +149,10 @@ pub fn Serializer(comptime T: type) type {
 
         /// Deserializes a value from a JSON string or binary byte slice.
         ///
-        /// JSON and binary formats (`"skir"` prefix) are detected automatically.
+        /// JSON and binary formats are detected automatically.
+        ///
+        /// `keepUnrecognizedValues` is intended for forward compatibility. Keep
+        /// it disabled by default for untrusted inputs.
         pub fn deserialize(self: Self, allocator: std.mem.Allocator, input: []const u8, opts: struct {
             keepUnrecognizedValues: bool = false,
         }) !T {
@@ -152,7 +166,9 @@ pub fn Serializer(comptime T: type) type {
             }
         }
 
-        /// Returns the `TypeDescriptor` describing the shape of `T`.
+        /// Returns a runtime `TypeDescriptor` describing the shape of `T`.
+        ///
+        /// This is useful for schema introspection endpoints and tooling.
         pub fn typeDescriptor(self: Self, allocator: std.mem.Allocator) !TypeDescriptor {
             var descriptors = TypeDescriptorMap.init(allocator);
             defer descriptors.deinit();
@@ -180,9 +196,9 @@ pub fn Method(comptime Request: type, comptime Response: type) type {
         number: i32,
         /// The documentation comment from the .skir file.
         doc: []const u8,
-        /// Serializer for request values.
+        /// Serializer for request values used by both client and service.
         request_serializer: Serializer(Request),
-        /// Serializer for response values.
+        /// Serializer for response values used by both client and service.
         response_serializer: Serializer(Response),
     };
 }

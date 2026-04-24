@@ -3,16 +3,26 @@ const serializer_mod = @import("serializer.zig");
 
 const Method = serializer_mod.Method;
 
+/// Error returned by `ServiceClient.invokeRemote` when the server responds
+/// with a non-2xx HTTP status code or when a network-level failure occurs.
 pub const RpcError = struct {
+    /// HTTP status code from the server, or 0 for client-side/network failures.
     status_code: u16,
+    /// Human-readable error message.
     message: []const u8,
 };
 
 pub const Header = struct {
+    /// Header name.
     key: []const u8,
+    /// Header value.
     value: []const u8,
 };
 
+/// Result of a remote invocation.
+///
+/// - `.ok`: decoded response value.
+/// - `.err`: RPC or transport error.
 pub fn RpcResult(comptime T: type) type {
     return union(enum) {
         ok: T,
@@ -20,11 +30,16 @@ pub fn RpcResult(comptime T: type) type {
     };
 }
 
+/// Sends RPCs to a SkirRPC service.
 pub const ServiceClient = struct {
     allocator: std.mem.Allocator,
     service_url: []const u8,
     default_headers: std.ArrayList(Header),
 
+    /// Creates a client targeting `service_url`.
+    ///
+    /// The URL must not include a query string. Per-call data belongs in the
+    /// request payload, not URL query parameters.
     pub fn init(allocator: std.mem.Allocator, service_url: []const u8) !ServiceClient {
         if (std.mem.indexOfScalar(u8, service_url, '?') != null) {
             return error.InvalidServiceUrl;
@@ -36,6 +51,9 @@ pub const ServiceClient = struct {
         };
     }
 
+    /// Releases client-owned allocations.
+    ///
+    /// Call once when the client is no longer needed.
     pub fn deinit(self: *ServiceClient) void {
         for (self.default_headers.items) |h| {
             self.allocator.free(h.key);
@@ -45,6 +63,9 @@ pub const ServiceClient = struct {
         self.allocator.free(self.service_url);
     }
 
+    /// Adds a default HTTP header sent with every invocation.
+    ///
+    /// Can be chained while setting up the client.
     pub fn withDefaultHeader(self: *ServiceClient, key: []const u8, value: []const u8) !*ServiceClient {
         try self.default_headers.append(self.allocator, .{
             .key = try self.allocator.dupe(u8, key),
@@ -53,6 +74,34 @@ pub const ServiceClient = struct {
         return self;
     }
 
+    /// Invokes a remote method and returns either a decoded response or
+    /// `RpcError`.
+    ///
+    /// `extra_headers` are added for this call only.
+    ///
+    /// The request is serialized using dense JSON. Successful responses are
+    /// deserialized while keeping unrecognized values so the client can talk to
+    /// a newer server schema when possible.
+    ///
+    /// For errors:
+    /// - non-2xx HTTP responses become `RpcError` with the server status code;
+    /// - transport/client failures use `status_code = 0`.
+    ///
+    /// Example:
+    /// ```zig
+    /// var client = try skir_client.ServiceClient.init(allocator, "http://127.0.0.1:18787/myapi");
+    /// defer client.deinit();
+    ///
+    /// _ = try client.withDefaultHeader("Authorization", "Bearer <token>");
+    ///
+    /// const result = try client.invokeRemote(
+    ///     GetUserRequest,
+    ///     GetUserResponse,
+    ///     &service_mod.get_user_method(),
+    ///     &.{ .user_id = 42, ._unrecognized = null },
+    ///     &.{},
+    /// );
+    /// ```
     pub fn invokeRemote(
         self: *const ServiceClient,
         comptime Req: type,

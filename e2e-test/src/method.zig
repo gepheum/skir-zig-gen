@@ -1,7 +1,7 @@
 const std = @import("std");
 const serializer = @import("serializer.zig");
 
-/// Metadata for a Skir RPC method.
+/// Signature of a SkirRPC method.
 pub fn Method(comptime Request: type, comptime Response: type) type {
     return struct {
         /// The method name as declared in the .skir file.

@@ -10,6 +10,11 @@ const timestamp = @import("timestamp.zig");
 const type_descriptor = @import("type_descriptor.zig");
 const unrecognized = @import("unrecognized.zig");
 
+/// Runtime entry-point module used by generated Zig code.
+///
+/// Import this module to access serializers, service/server APIs, client APIs,
+/// and schema descriptor helpers from one place.
+
 // Core runtime types
 pub const KeyedArray = keyed_array.KeyedArray;
 pub const Method = core.Method;

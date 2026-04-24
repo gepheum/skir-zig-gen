@@ -5,19 +5,24 @@ const type_descriptor = @import("type_descriptor.zig");
 const SerializeFormat = serializer_mod.SerializeFormat;
 const Method = serializer_mod.Method;
 
-// =============================================================================
-// RawResponse
-// =============================================================================
-
+/// The raw HTTP response returned by `Service.handleRequest`.
+///
+/// Pass these fields directly to your HTTP framework's response writer.
 pub const RawResponse = struct {
+    /// Response body to write as-is in your HTTP handler.
     data: []const u8,
+    /// HTTP status code (for example: 200, 400, 500).
     status_code: u16,
+    /// Full HTTP status line to write as-is when speaking raw HTTP.
+    status_line: []const u8,
+    /// Value to use for the `Content-Type` response header.
     content_type: []const u8,
 
     fn okJson(data: []const u8) RawResponse {
         return .{
             .data = data,
             .status_code = 200,
+            .status_line = statusLine(200),
             .content_type = "application/json",
         };
     }
@@ -26,6 +31,7 @@ pub const RawResponse = struct {
         return .{
             .data = data,
             .status_code = 200,
+            .status_line = statusLine(200),
             .content_type = "text/html; charset=utf-8",
         };
     }
@@ -34,6 +40,7 @@ pub const RawResponse = struct {
         return .{
             .data = msg,
             .status_code = 400,
+            .status_line = statusLine(400),
             .content_type = "text/plain; charset=utf-8",
         };
     }
@@ -42,15 +49,13 @@ pub const RawResponse = struct {
         return .{
             .data = msg,
             .status_code = status_code,
+            .status_line = statusLine(status_code),
             .content_type = "text/plain; charset=utf-8",
         };
     }
 };
 
-// =============================================================================
-// HttpErrorCode
-// =============================================================================
-
+/// An HTTP error status code (4xx or 5xx).
 pub const HttpErrorCode = enum(u16) {
     _400_BadRequest = 400,
     _401_Unauthorized = 401,
@@ -93,6 +98,7 @@ pub const HttpErrorCode = enum(u16) {
     _510_NotExtended = 510,
     _511_NetworkAuthenticationRequired = 511,
 
+    /// Returns the numeric HTTP status code.
     pub fn asU16(self: HttpErrorCode) u16 {
         return @intFromEnum(self);
     }
@@ -102,11 +108,11 @@ pub const HttpErrorCode = enum(u16) {
 // ServiceError
 // =============================================================================
 
-pub const ServiceError = struct {
-    status_code: HttpErrorCode,
-    message: []const u8,
-};
-
+/// Result returned by your method implementation.
+///
+/// - `.ok`: successful method result.
+/// - `.service_error`: intentional client-facing error with explicit status.
+/// - `.unknown_error`: unexpected error; returned as 500.
 pub fn MethodResult(comptime T: type) type {
     return union(enum) {
         ok: T,
@@ -115,12 +121,42 @@ pub fn MethodResult(comptime T: type) type {
     };
 }
 
+/// Return this from a method implementation to control the HTTP error response
+/// sent to the client.
+///
+/// Any method result returned as `.unknown_error` is treated as an internal
+/// server error (HTTP 500). The message from unknown errors is only exposed to
+/// the client when `setCanSendUnknownErrorMessage` or
+/// `setCanSendUnknownErrorMessageFn` allows it.
+pub const ServiceError = struct {
+    /// HTTP status code to send to the client.
+    status_code: HttpErrorCode,
+    /// Message to send in the response body.
+    ///
+    /// If this is empty, the runtime falls back to the standard status text
+    /// for `status_code`.
+    message: []const u8,
+};
+
+/// Context passed to Service error hooks.
+///
+/// `Meta` is your request-context type: a value built by your HTTP layer from
+/// the incoming request and then passed through the Skir runtime.
+///
+/// This same context value is visible in method implementations, in
+/// `setErrorLogger`, and in `setCanSendUnknownErrorMessageFn`.
 pub fn MethodErrorInfo(comptime Meta: type) type {
     return struct {
+        /// Name of the method being invoked.
         method_name: []const u8,
-        raw_request: []const u8,
+        /// Request context supplied to `handleRequest` for this invocation.
+        ///
+        /// Typical examples are auth information, client IP, request IDs, or a
+        /// per-request logger.
         request_meta: Meta,
+        /// Error message returned by the method or runtime.
         error_message: []const u8,
+        /// Present only when the error is a structured `ServiceError`.
         service_error: ?ServiceError,
     };
 }
@@ -147,6 +183,33 @@ fn MethodEntry(comptime Meta: type) type {
     };
 }
 
+/// Dispatches RPC requests to registered method implementations.
+///
+/// `Meta` is your request-context type.
+///
+/// You define it in your application, build one value per incoming HTTP
+/// request, and pass it to `handleRequest`. The runtime then passes that same
+/// value to every method implementation handling that request.
+///
+/// Typical examples are auth tokens, authenticated user IDs, client IPs, or
+/// request-scoped logging/tracing data. Use `void` when you do not need any
+/// request context.
+///
+/// Example request-context type:
+/// ```zig
+/// const RequestMeta = struct {
+///     auth_token: []const u8,
+///     client_ip: []const u8,
+/// };
+/// ```
+///
+/// Typical setup:
+/// ```zig
+/// var service = try skir_client.Service(RequestMeta).init(allocator);
+/// _ = try service.addMethod(GetUserRequest, GetUserResponse, &service_mod.get_user_method(), get_user_impl);
+/// _ = try service.addMethod(AddUserRequest, AddUserResponse, &service_mod.add_user_method(), add_user_impl);
+/// defer service.deinit();
+/// ```
 pub fn Service(comptime Meta: type) type {
     return struct {
         const Self = @This();
@@ -161,6 +224,12 @@ pub fn Service(comptime Meta: type) type {
         by_num: std.AutoHashMap(i64, Entry),
         by_name: std.StringHashMap(i64),
 
+        /// Creates a service instance with safe defaults.
+        ///
+        /// Defaults:
+        /// - unknown error messages are not exposed to clients.
+        /// - unknown fields are not kept while decoding requests.
+        /// - the built-in Studio page uses the CDN-hosted JavaScript bundle.
         pub fn init(allocator: std.mem.Allocator) !Self {
             return .{
                 .allocator = allocator,
@@ -173,11 +242,19 @@ pub fn Service(comptime Meta: type) type {
             };
         }
 
+        /// Controls whether request decoding keeps unrecognized values.
+        ///
+        /// Keep this disabled for untrusted input. Enable only when you need
+        /// forward-compatibility behavior and trust the request source.
         pub fn setKeepUnrecognizedValues(self: *Self, keep: bool) *Self {
             self.keep_unrecognized_values = keep;
             return self;
         }
 
+        /// Sets a fixed policy for exposing unknown error messages.
+        ///
+        /// `false` (default) avoids leaking internal details in HTTP 500
+        /// responses.
         pub fn setCanSendUnknownErrorMessage(self: *Self, can: bool) *Self {
             if (can) {
                 self.can_send_unknown_error_message_fn = alwaysTrueCanSend(Meta);
@@ -187,22 +264,43 @@ pub fn Service(comptime Meta: type) type {
             return self;
         }
 
+        /// Sets a per-request policy for exposing unknown error messages.
+        ///
+        /// Use this when exposure depends on request context.
         pub fn setCanSendUnknownErrorMessageFn(self: *Self, f: *const fn (*const ErrorInfo) bool) *Self {
             self.can_send_unknown_error_message_fn = f;
             return self;
         }
 
+        /// Installs an error logger callback.
+        ///
+        /// Called for both `service_error` and `unknown_error` outcomes.
+        ///
+        /// The default logger prints a one-line message to stderr.
         pub fn setErrorLogger(self: *Self, logger: *const fn (*const ErrorInfo) void) *Self {
             self.error_logger_fn = logger;
             return self;
         }
 
+        /// Overrides the JavaScript URL used by the built-in `studio` endpoint.
+        ///
+        /// Skir Studio is a browser UI for exploring and testing the service.
+        /// The default value points to the CDN-hosted bundle.
         pub fn setStudioAppJsUrl(self: *Self, url: []const u8) !*Self {
             self.allocator.free(self.studio_app_js_url);
             self.studio_app_js_url = try self.allocator.dupe(u8, url);
             return self;
         }
 
+        /// Registers one method implementation.
+        ///
+        /// `impl_fn` receives three inputs:
+        /// - the allocator for request-scoped allocations,
+        /// - the deserialized request value,
+        /// - the `Meta` request-context value passed to `handleRequest`.
+        ///
+        /// Returns `error.DuplicateMethodNumber` if the method number is
+        /// already registered.
         pub fn addMethod(
             self: *Self,
             comptime Req: type,
@@ -254,6 +352,9 @@ pub fn Service(comptime Meta: type) type {
             return self;
         }
 
+        /// Releases service-owned resources.
+        ///
+        /// Call once when the service is no longer used.
         pub fn deinit(self: *Self) void {
             var by_num_it = self.by_num.iterator();
             while (by_num_it.next()) |kv| {
@@ -273,6 +374,26 @@ pub fn Service(comptime Meta: type) type {
             self.allocator.free(self.studio_app_js_url);
         }
 
+        /// Parses and dispatches a raw RPC request body.
+        ///
+        /// `meta` is the request-context value for this specific HTTP request.
+        /// Build it from your framework request object before calling into the
+        /// Skir runtime.
+        ///
+        /// In a typical HTTP integration:
+        /// - for POST requests, pass the raw request body;
+        /// - for GET requests, pass the decoded query string.
+        ///
+        /// Integration pattern:
+        /// ```zig
+        /// var request_arena = std.heap.ArenaAllocator.init(allocator);
+        /// defer request_arena.deinit();
+        /// const request_allocator = request_arena.allocator();
+        ///
+        /// const raw_response = try service.handleRequest(request_allocator, body_for_service, {});
+        ///
+        /// try stream.writeAll(raw_response.status_line);
+        /// ```
         pub fn handleRequest(self: *const Self, allocator: std.mem.Allocator, body: []const u8, meta: Meta) !RawResponse {
             if (std.mem.eql(u8, body, "") or std.mem.eql(u8, body, "studio")) {
                 return serveStudio(allocator, self.studio_app_js_url);
@@ -403,15 +524,11 @@ pub fn Service(comptime Meta: type) type {
             readable: bool,
             meta: Meta,
         ) !RawResponse {
-            const raw_request = try allocator.dupe(u8, request_json);
-            defer allocator.free(raw_request);
-
             const outcome = entry.invoke_fn(allocator, request_json, keep_unrecognized, readable, meta) catch |err| {
                 const msg = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)});
                 defer allocator.free(msg);
                 const info: ErrorInfo = .{
                     .method_name = entry.name,
-                    .raw_request = raw_request,
                     .request_meta = meta,
                     .error_message = msg,
                     .service_error = null,
@@ -430,7 +547,6 @@ pub fn Service(comptime Meta: type) type {
                 .service_error => |svc| {
                     const info: ErrorInfo = .{
                         .method_name = entry.name,
-                        .raw_request = raw_request,
                         .request_meta = meta,
                         .error_message = svc.message,
                         .service_error = svc,
@@ -445,7 +561,6 @@ pub fn Service(comptime Meta: type) type {
                 .unknown_error => |err_msg| {
                     const info: ErrorInfo = .{
                         .method_name = entry.name,
-                        .raw_request = raw_request,
                         .request_meta = meta,
                         .error_message = err_msg,
                         .service_error = null,
@@ -529,6 +644,49 @@ fn htmlEscapeAttr(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     return out.toOwnedSlice(allocator);
 }
 
+fn statusLine(code: u16) []const u8 {
+    return switch (code) {
+        200 => "HTTP/1.1 200 OK\r\n",
+        else => switch (@as(HttpErrorCode, @enumFromInt(code))) {
+            ._400_BadRequest => "HTTP/1.1 400 Bad Request\r\n",
+            ._401_Unauthorized => "HTTP/1.1 401 Unauthorized\r\n",
+            ._402_PaymentRequired => "HTTP/1.1 402 Payment Required\r\n",
+            ._403_Forbidden => "HTTP/1.1 403 Forbidden\r\n",
+            ._404_NotFound => "HTTP/1.1 404 Not Found\r\n",
+            ._405_MethodNotAllowed => "HTTP/1.1 405 Method Not Allowed\r\n",
+            ._406_NotAcceptable => "HTTP/1.1 406 Not Acceptable\r\n",
+            ._407_ProxyAuthenticationRequired => "HTTP/1.1 407 Proxy Authentication Required\r\n",
+            ._408_RequestTimeout => "HTTP/1.1 408 Request Timeout\r\n",
+            ._409_Conflict => "HTTP/1.1 409 Conflict\r\n",
+            ._410_Gone => "HTTP/1.1 410 Gone\r\n",
+            ._411_LengthRequired => "HTTP/1.1 411 Length Required\r\n",
+            ._412_PreconditionFailed => "HTTP/1.1 412 Precondition Failed\r\n",
+            ._413_ContentTooLarge => "HTTP/1.1 413 Content Too Large\r\n",
+            ._414_UriTooLong => "HTTP/1.1 414 URI Too Long\r\n",
+            ._415_UnsupportedMediaType => "HTTP/1.1 415 Unsupported Media Type\r\n",
+            ._416_RangeNotSatisfiable => "HTTP/1.1 416 Range Not Satisfiable\r\n",
+            ._417_ExpectationFailed => "HTTP/1.1 417 Expectation Failed\r\n",
+            ._418_ImATeapot => "HTTP/1.1 418 I'm a Teapot\r\n",
+            ._421_MisdirectedRequest => "HTTP/1.1 421 Misdirected Request\r\n",
+            ._422_UnprocessableContent => "HTTP/1.1 422 Unprocessable Content\r\n",
+            ._423_Locked => "HTTP/1.1 423 Locked\r\n",
+            ._424_FailedDependency => "HTTP/1.1 424 Failed Dependency\r\n",
+            ._425_TooEarly => "HTTP/1.1 425 Too Early\r\n",
+            ._426_UpgradeRequired => "HTTP/1.1 426 Upgrade Required\r\n",
+            ._428_PreconditionRequired => "HTTP/1.1 428 Precondition Required\r\n",
+            ._429_TooManyRequests => "HTTP/1.1 429 Too Many Requests\r\n",
+            ._431_RequestHeaderFieldsTooLarge => "HTTP/1.1 431 Request Header Fields Too Large\r\n",
+            ._451_UnavailableForLegalReasons => "HTTP/1.1 451 Unavailable For Legal Reasons\r\n",
+            ._500_InternalServerError => "HTTP/1.1 500 Internal Server Error\r\n",
+            ._501_NotImplemented => "HTTP/1.1 501 Not Implemented\r\n",
+            ._502_BadGateway => "HTTP/1.1 502 Bad Gateway\r\n",
+            ._503_ServiceUnavailable => "HTTP/1.1 503 Service Unavailable\r\n",
+            ._504_GatewayTimeout => "HTTP/1.1 504 Gateway Timeout\r\n",
+            ._505_HttpVersionNotSupported => "HTTP/1.1 505 HTTP Version Not Supported\r\n",
+        },
+    };
+}
+
 pub fn httpStatusText(code: HttpErrorCode) []const u8 {
     return switch (code) {
         ._400_BadRequest => "Bad Request",
@@ -571,13 +729,6 @@ pub fn httpStatusText(code: HttpErrorCode) []const u8 {
         ._508_LoopDetected => "Loop Detected",
         ._510_NotExtended => "Not Extended",
         ._511_NetworkAuthenticationRequired => "Network Authentication Required",
-    };
-}
-
-pub fn rawHttpStatusText(code: u16) []const u8 {
-    return switch (code) {
-        200 => "OK",
-        else => std.http.Status.phrase(@enumFromInt(code)) orelse "Error",
     };
 }
 

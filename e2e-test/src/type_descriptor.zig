@@ -16,6 +16,7 @@ pub const PrimitiveType = enum {
     String,
     Bytes,
 
+    /// Returns the canonical schema name used in descriptor JSON.
     pub fn asStr(self: PrimitiveType) []const u8 {
         return switch (self) {
             .Bool => "bool",
@@ -51,7 +52,9 @@ pub const PrimitiveType = enum {
 
 /// Describes an ordered collection of elements of a single type.
 pub const ArrayDescriptor = struct {
+    /// Descriptor for each element.
     item_type: *const TypeDescriptor,
+    /// Optional key path for keyed collections.
     key_extractor: []const u8,
 };
 
@@ -85,24 +88,28 @@ pub const EnumVariant = union(enum) {
     constant: EnumConstantVariant,
     wrapper: EnumWrapperVariant,
 
+    /// Variant name as declared in schema.
     pub fn name(self: EnumVariant) []const u8 {
         return switch (self) {
             .constant => |v| v.name,
             .wrapper => |v| v.name,
         };
     }
+    /// Stable numeric identifier of the variant.
     pub fn number(self: EnumVariant) i32 {
         return switch (self) {
             .constant => |v| v.number,
             .wrapper => |v| v.number,
         };
     }
+    /// Schema documentation attached to the variant.
     pub fn doc(self: EnumVariant) []const u8 {
         return switch (self) {
             .constant => |v| v.doc,
             .wrapper => |v| v.doc,
         };
     }
+    /// Wrapped payload type for wrapper variants; `null` for constant variants.
     pub fn variantType(self: EnumVariant) ?*const TypeDescriptor {
         return switch (self) {
             .constant => null,
@@ -120,6 +127,7 @@ pub const StructDescriptor = struct {
     fields: []const StructField = &.{},
     removed_numbers: []const i32 = &.{},
 
+    /// Returns a field by schema name, or `null` when missing.
     pub fn fieldByName(self: StructDescriptor, field_name: []const u8) ?StructField {
         for (self.fields) |f| {
             if (std.mem.eql(u8, f.name, field_name)) return f;
@@ -127,6 +135,7 @@ pub const StructDescriptor = struct {
         return null;
     }
 
+    /// Returns a field by stable field number, or `null` when missing.
     pub fn fieldByNumber(self: StructDescriptor, num: i32) ?StructField {
         for (self.fields) |f| {
             if (f.number == num) return f;
@@ -144,6 +153,7 @@ pub const EnumDescriptor = struct {
     variants: []const EnumVariant = &.{},
     removed_numbers: []const i32 = &.{},
 
+    /// Returns a variant by schema name, or `null` when missing.
     pub fn variantByName(self: EnumDescriptor, variant_name: []const u8) ?EnumVariant {
         for (self.variants) |v| {
             if (std.mem.eql(u8, v.name(), variant_name)) return v;
@@ -151,6 +161,7 @@ pub const EnumDescriptor = struct {
         return null;
     }
 
+    /// Returns a variant by stable variant number, or `null` when missing.
     pub fn variantByNumber(self: EnumDescriptor, num: i32) ?EnumVariant {
         for (self.variants) |v| {
             if (v.number() == num) return v;
@@ -182,6 +193,9 @@ pub const TypeDescriptorMap = std.StringHashMap(*TypeDescriptor);
 ///
 /// The returned slice is allocated with `allocator` and must be freed by the
 /// caller.
+///
+/// This format is intended for tooling/introspection, such as exposing
+/// method request/response shapes in a service endpoint.
 pub fn typeDescriptorToJson(allocator: std.mem.Allocator, td: TypeDescriptor) ![]const u8 {
     var records_list = std.ArrayList(RecordEntry){};
     defer records_list.deinit(allocator);
@@ -402,6 +416,16 @@ fn sortedIntegers(allocator: std.mem.Allocator, nums: []const i32) ![]i32 {
 ///
 /// All returned memory (strings, slices, nested descriptors) is owned by
 /// `allocator` and must be freed by the caller.
+///
+/// Typical round-trip usage:
+/// ```zig
+/// const td = try serializer.typeDescriptor(allocator);
+/// const td_json = try skir_client.typeDescriptorToJson(allocator, td);
+/// defer allocator.free(td_json);
+///
+/// const parsed = try skir_client.typeDescriptorFromJson(allocator, td_json);
+/// _ = parsed;
+/// ```
 pub fn typeDescriptorFromJson(allocator: std.mem.Allocator, json_code: []const u8) !TypeDescriptor {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_code, .{});
     defer parsed.deinit();
