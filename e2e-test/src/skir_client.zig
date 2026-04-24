@@ -52,6 +52,7 @@ pub const Service = service.Service;
 pub const ServiceClient = service_client.ServiceClient;
 pub const ServiceError = service.ServiceError;
 pub const httpStatusText = service.httpStatusText;
+pub const getPercentDecodedQueryFromUrl = service.getPercentDecodedQueryFromUrl;
 
 // Type descriptors
 pub const ArrayDescriptor = type_descriptor.ArrayDescriptor;

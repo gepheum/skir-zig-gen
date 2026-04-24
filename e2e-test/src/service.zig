@@ -382,7 +382,9 @@ pub fn Service(comptime Meta: type) type {
         ///
         /// In a typical HTTP integration:
         /// - for POST requests, pass the raw request body;
-        /// - for GET requests, pass the decoded query string.
+        /// - for GET requests, pass the decoded query string (use
+        ///   `getPercentDecodedQueryFromUrl` to extract it from the request
+        ///   target).
         ///
         /// Integration pattern:
         /// ```zig
@@ -743,6 +745,60 @@ pub fn httpStatusText(code: HttpErrorCode) []const u8 {
         ._510_NotExtended => "Not Extended",
         ._511_NetworkAuthenticationRequired => "Network Authentication Required",
     };
+}
+
+/// Extracts and percent-decodes the query string from a URL.
+///
+/// Pass the full HTTP request target (e.g. `/myapi?list` or
+/// `/myapi?{"method":"GetUser",...}`). The `?` and everything before it are
+/// stripped; the remainder is percent-decoded and returned as an owned slice.
+///
+/// Returns an empty owned slice when the URL has no `?` component. Invalid
+/// `%xx` escape sequences are passed through as-is rather than causing an
+/// error.
+///
+/// The caller owns the returned slice and must free it.
+///
+/// Typical GET request handling:
+/// ```zig
+/// const body = try skir_client.getPercentDecodedQueryFromUrl(allocator, req.target);
+/// defer allocator.free(body);
+/// const raw_response = try service.handleRequest(allocator, body, meta);
+/// ```
+pub fn getPercentDecodedQueryFromUrl(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
+    const query_start = std.mem.indexOfScalar(u8, url, '?') orelse {
+        return allocator.dupe(u8, "");
+    };
+    const raw_query = url[query_start + 1 ..];
+    return percentDecodeQuery(allocator, raw_query);
+}
+
+fn percentDecodeQuery(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < input.len) : (i += 1) {
+        const c = input[i];
+        if (c == '%' and i + 2 < input.len) {
+            const hi = std.fmt.charToDigit(input[i + 1], 16) catch {
+                try out.append(allocator, c);
+                continue;
+            };
+            const lo = std.fmt.charToDigit(input[i + 2], 16) catch {
+                try out.append(allocator, c);
+                continue;
+            };
+            try out.append(allocator, @as(u8, @intCast((hi << 4) | lo)));
+            i += 2;
+        } else if (c == '+') {
+            try out.append(allocator, ' ');
+        } else {
+            try out.append(allocator, c);
+        }
+    }
+
+    return out.toOwnedSlice(allocator);
 }
 
 fn defaultCanSendUnknownErrorMessage(comptime Meta: type) fn (*const MethodErrorInfo(Meta)) bool {
