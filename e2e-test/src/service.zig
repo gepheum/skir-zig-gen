@@ -446,7 +446,15 @@ pub fn Service(comptime Meta: type) type {
             }
             try out.appendSlice(allocator, "]}");
 
-            return RawResponse.okJson(try out.toOwnedSlice(allocator));
+            // Re-serialize with pretty-print so the whole response is uniformly
+            // indented (the type-descriptor sub-blobs are already pretty JSON).
+            const compact = try out.toOwnedSlice(allocator);
+            defer allocator.free(compact);
+            const parsed = try std.json.parseFromSlice(std.json.Value, allocator, compact, .{});
+            defer parsed.deinit();
+            const pretty = try std.json.Stringify.valueAlloc(allocator, parsed.value, .{ .whitespace = .indent_2 });
+
+            return RawResponse.okJson(pretty);
         }
 
         fn handleJsonRequest(self: *const Self, allocator: std.mem.Allocator, body: []const u8, meta: Meta) !RawResponse {
@@ -683,6 +691,11 @@ fn statusLine(code: u16) []const u8 {
             ._503_ServiceUnavailable => "HTTP/1.1 503 Service Unavailable\r\n",
             ._504_GatewayTimeout => "HTTP/1.1 504 Gateway Timeout\r\n",
             ._505_HttpVersionNotSupported => "HTTP/1.1 505 HTTP Version Not Supported\r\n",
+            ._506_VariantAlsoNegotiates => "HTTP/1.1 506 Variant Also Negotiates\r\n",
+            ._507_InsufficientStorage => "HTTP/1.1 507 Insufficient Storage\r\n",
+            ._508_LoopDetected => "HTTP/1.1 508 Loop Detected\r\n",
+            ._510_NotExtended => "HTTP/1.1 510 Not Extended\r\n",
+            ._511_NetworkAuthenticationRequired => "HTTP/1.1 511 Network Authentication Required\r\n",
         },
     };
 }
