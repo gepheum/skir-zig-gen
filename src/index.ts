@@ -1123,10 +1123,12 @@ function relativePathFromModule(
   fromModulePath: string,
   toModulePath: string | null,
 ): string {
+  if (toModulePath === null) {
+    return "skir_client";
+  }
+
   const fromFile = `src/skirout/${modulePathToOutputPath(fromModulePath)}`;
-  const toFile = toModulePath
-    ? `src/skirout/${modulePathToOutputPath(toModulePath)}`
-    : "src/skir_client.zig";
+  const toFile = `src/skirout/${modulePathToOutputPath(toModulePath)}`;
   const fromDir = fromFile.slice(0, fromFile.lastIndexOf("/"));
   const fromParts = fromDir.split("/");
   const toParts = toFile.split("/");

@@ -3,6 +3,12 @@
     .version = "0.1.0",
     .fingerprint = 0xbc57ebaecaee3a42,
     .minimum_zig_version = "0.15.0",
+    .dependencies = .{
+        .skir_client = .{
+            .url = "https://github.com/gepheum/skir-zig-client/archive/refs/heads/main.tar.gz",
+            .hash = "skir_client-0.1.0-Bu7WIKEVBAAIQeH3RHEn4t0-MkgfvyDtCqfxFabZl7Rp",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
