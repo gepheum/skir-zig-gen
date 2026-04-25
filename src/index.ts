@@ -206,7 +206,7 @@ class ZigSourceFileGenerator {
     }
 
     this.push(
-      `_unrecognized: ?skir_client.UnrecognizedFields(@This()) = null,\n`,
+      `_unrecognized: ?skir_client._UnrecognizedFields(@This()) = null,\n`,
     );
     this.push(`\n`);
     this.push(`pub const default: @This() = .{\n`);
@@ -261,7 +261,7 @@ class ZigSourceFileGenerator {
     }
 
     this.push(
-      `${GENERATED_UNKNOWN_VARIANT_NAME}: skir_client.UnrecognizedVariant(@This()),\n`,
+      `${GENERATED_UNKNOWN_VARIANT_NAME}: skir_client._UnrecognizedVariant(@This()),\n`,
     );
     for (const variant of loc.record.fields) {
       this.push(commentify(docToCommentText(variant.doc)));
@@ -371,10 +371,10 @@ class ZigSourceFileGenerator {
     this.push(`${toZigStringLiteral(qualifiedName)},\n`);
     this.push(`${toZigStringLiteral(docToCommentText(loc.record.doc))},\n`);
     this.push(
-      `struct { fn get(x: *const S) ?skir_client.UnrecognizedFields(S) { return x._unrecognized; } }.get,\n`,
+      `struct { fn get(x: *const S) ?skir_client._UnrecognizedFields(S) { return x._unrecognized; } }.get,\n`,
     );
     this.push(
-      `struct { fn set(x: *S, u: ?skir_client.UnrecognizedFields(S)) void { x._unrecognized = u; } }.set,\n`,
+      `struct { fn set(x: *S, u: ?skir_client._UnrecognizedFields(S)) void { x._unrecognized = u; } }.set,\n`,
     );
     this.push(`) catch unreachable;\n`);
 
@@ -481,11 +481,11 @@ class ZigSourceFileGenerator {
     this.push(`}\n`);
     this.push(`}.getKindOrdinal,\n`);
     this.push(
-      `struct { fn wrapUnknown(u: skir_client.UnrecognizedVariant(S)) S { return .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = u }; } }.wrapUnknown,\n`,
+      `struct { fn wrapUnknown(u: skir_client._UnrecognizedVariant(S)) S { return .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = u }; } }.wrapUnknown,\n`,
     );
     this.push(`struct {\n`);
     this.push(
-      `fn getUnknown(x: *const S) ?skir_client.UnrecognizedVariant(S) {\n`,
+      `fn getUnknown(x: *const S) ?skir_client._UnrecognizedVariant(S) {\n`,
     );
     this.push(`return switch (x.*) {\n`);
     this.push(`.${GENERATED_UNKNOWN_VARIANT_NAME} => |u| u,\n`);

@@ -658,27 +658,41 @@ pub fn boolSerializer() Serializer(bool) {
     return _serializerFromAdapter(bool, BoolAdapter);
 }
 
+/// Returns a `Serializer` for `i32` values.
 pub fn int32Serializer() Serializer(i32) {
     return _serializerFromAdapter(i32, Int32Adapter);
 }
+/// Returns a `Serializer` for `i64` values.
 pub fn int64Serializer() Serializer(i64) {
     return _serializerFromAdapter(i64, Int64Adapter);
 }
+/// Returns a `Serializer` for `u64` hash values.
 pub fn hash64Serializer() Serializer(u64) {
     return _serializerFromAdapter(u64, Hash64Adapter);
 }
+/// Returns a `Serializer` for `f32` values.
 pub fn float32Serializer() Serializer(f32) {
     return _serializerFromAdapter(f32, Float32Adapter);
 }
+/// Returns a `Serializer` for `f64` values.
 pub fn float64Serializer() Serializer(f64) {
     return _serializerFromAdapter(f64, Float64Adapter);
 }
+/// Returns a `Serializer` for UTF-8 string values (`[]const u8`).
 pub fn stringSerializer() Serializer([]const u8) {
     return _serializerFromAdapter([]const u8, StringAdapter);
 }
+/// Returns a `Serializer` for raw byte blobs (`[]const u8`).
+///
+/// Unlike `stringSerializer`, byte values are base64-encoded in JSON rather
+/// than written as a UTF-8 string.
 pub fn bytesSerializer() Serializer([]const u8) {
     return _serializerFromAdapter([]const u8, BytesAdapter);
 }
+/// Returns a `Serializer` for `Timestamp` values.
+///
+/// JSON representation: RFC 3339 string (e.g. `"2024-01-15T12:00:00Z"`).
+/// Wire encoding: 8-byte little-endian Unix microseconds.
 pub fn timestampSerializer() Serializer(Timestamp) {
     return _serializerFromAdapter(Timestamp, TimestampAdapter);
 }
@@ -882,6 +896,11 @@ pub fn optionalSerializer(comptime inner: anytype) Serializer(?@TypeOf(inner).Va
     return _serializerFromAdapter(?T, Adapter);
 }
 
+/// Returns a serializer for `Recursive(T)` values.
+///
+/// Use this for self-referential types (e.g. a tree node that contains child
+/// nodes of the same type). `Recursive(T)` heap-allocates non-default values
+/// to break the layout cycle.
 pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(@import("recursive.zig").Recursive(T)) {
     const Recursive = @import("recursive.zig").Recursive(T);
     const ivt = inner._vtable;
@@ -931,6 +950,10 @@ pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Seri
     return _serializerFromAdapter(Recursive, Adapter);
 }
 
+/// Returns a serializer for `*const T` pointer values.
+///
+/// Serialization delegates entirely to `inner`; the pointer is transparent on
+/// the wire. Deserialization allocates a new `T` from the request allocator.
 pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serializer(*const T) {
     const ivt = inner._vtable;
     const Adapter = struct {
