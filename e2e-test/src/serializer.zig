@@ -1,5 +1,6 @@
 const std = @import("std");
 const type_descriptor = @import("type_descriptor.zig");
+const method = @import("method.zig");
 
 const TypeDescriptor = type_descriptor.TypeDescriptor;
 
@@ -34,19 +35,6 @@ pub fn _SerializerVTable(comptime T: type) type {
 // =============================================================================
 
 /// A value that can serialize and deserialize values of type `T`.
-///
-/// Obtain instances via the factory functions (`boolSerializer`, etc.).
-/// Default-initialize one (`Serializer(MyRecord){}`) for generated record types.
-///
-/// Typical usage with generated methods:
-/// ```zig
-/// const method = service_mod.get_user_method();
-/// const req_json = try method.request_serializer.serialize(allocator, req, .{ .format = .denseJson });
-/// defer allocator.free(req_json);
-///
-/// const req_copy = try method.request_serializer.deserialize(allocator, req_json, .{});
-/// _ = req_copy;
-/// ```
 pub fn Serializer(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -180,18 +168,4 @@ pub fn _serializerFromAdapter(comptime T: type, comptime Impl: type) Serializer(
 // Method
 // =============================================================================
 
-/// Metadata for a Skir RPC method.
-pub fn Method(comptime Request: type, comptime Response: type) type {
-    return struct {
-        /// The method name as declared in the .skir file.
-        name: []const u8,
-        /// The stable numeric identifier of the method.
-        number: i32,
-        /// The documentation comment from the .skir file.
-        doc: []const u8,
-        /// Serializer for request values used by both client and service.
-        request_serializer: Serializer(Request),
-        /// Serializer for response values used by both client and service.
-        response_serializer: Serializer(Response),
-    };
-}
+pub const Method = method.Method;

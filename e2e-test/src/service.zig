@@ -140,12 +140,12 @@ pub const ServiceError = struct {
 
 /// Context passed to Service error hooks.
 ///
-/// `Meta` is your request-context type: a value built by your HTTP layer from
+/// `ReqMeta` is your request-context type: a value built by your HTTP layer from
 /// the incoming request and then passed through the Skir runtime.
 ///
 /// This same context value is visible in method implementations, in
 /// `setErrorLogger`, and in `setCanSendUnknownErrorMessageFn`.
-pub fn MethodErrorInfo(comptime Meta: type) type {
+pub fn MethodErrorInfo(comptime ReqMeta: type) type {
     return struct {
         /// Name of the method being invoked.
         method_name: []const u8,
@@ -153,7 +153,7 @@ pub fn MethodErrorInfo(comptime Meta: type) type {
         ///
         /// Typical examples are auth information, client IP, request IDs, or a
         /// per-request logger.
-        request_meta: Meta,
+        request_meta: ReqMeta,
         /// Error message returned by the method or runtime.
         error_message: []const u8,
         /// Present only when the error is a structured `ServiceError`.
@@ -163,8 +163,8 @@ pub fn MethodErrorInfo(comptime Meta: type) type {
 
 const DEFAULT_STUDIO_APP_JS_URL = "https://cdn.jsdelivr.net/npm/skir-studio/dist/skir-studio-standalone.js";
 
-fn InvokeOutcome(comptime Meta: type) type {
-    _ = Meta;
+fn InvokeOutcome(comptime ReqMeta: type) type {
+    _ = ReqMeta;
     return union(enum) {
         ok_json: []const u8,
         service_error: ServiceError,
@@ -172,20 +172,20 @@ fn InvokeOutcome(comptime Meta: type) type {
     };
 }
 
-fn MethodEntry(comptime Meta: type) type {
+fn MethodEntry(comptime ReqMeta: type) type {
     return struct {
         name: []const u8,
         number: i64,
         doc: []const u8,
         request_type_descriptor_json: []const u8,
         response_type_descriptor_json: []const u8,
-        invoke_fn: *const fn (std.mem.Allocator, []const u8, bool, bool, Meta) anyerror!InvokeOutcome(Meta),
+        invoke_fn: *const fn (std.mem.Allocator, []const u8, bool, bool, ReqMeta) anyerror!InvokeOutcome(ReqMeta),
     };
 }
 
 /// Dispatches RPC requests to registered method implementations.
 ///
-/// `Meta` is your request-context type.
+/// `ReqMeta` is your request-context type.
 ///
 /// You define it in your application, build one value per incoming HTTP
 /// request, and pass it to `handleRequest`. The runtime then passes that same
@@ -210,11 +210,11 @@ fn MethodEntry(comptime Meta: type) type {
 /// _ = try service.addMethod(AddUserRequest, AddUserResponse, &service_mod.add_user_method(), add_user_impl);
 /// defer service.deinit();
 /// ```
-pub fn Service(comptime Meta: type) type {
+pub fn Service(comptime ReqMeta: type) type {
     return struct {
         const Self = @This();
-        const Entry = MethodEntry(Meta);
-        const ErrorInfo = MethodErrorInfo(Meta);
+        const Entry = MethodEntry(ReqMeta);
+        const ErrorInfo = MethodErrorInfo(ReqMeta);
 
         allocator: std.mem.Allocator,
         keep_unrecognized_values: bool,
@@ -234,8 +234,8 @@ pub fn Service(comptime Meta: type) type {
             return .{
                 .allocator = allocator,
                 .keep_unrecognized_values = false,
-                .can_send_unknown_error_message_fn = defaultCanSendUnknownErrorMessage(Meta),
-                .error_logger_fn = defaultErrorLogger(Meta),
+                .can_send_unknown_error_message_fn = defaultCanSendUnknownErrorMessage(ReqMeta),
+                .error_logger_fn = defaultErrorLogger(ReqMeta),
                 .studio_app_js_url = try allocator.dupe(u8, DEFAULT_STUDIO_APP_JS_URL),
                 .by_num = std.AutoHashMap(i64, Entry).init(allocator),
                 .by_name = std.StringHashMap(i64).init(allocator),
@@ -257,9 +257,9 @@ pub fn Service(comptime Meta: type) type {
         /// responses.
         pub fn setCanSendUnknownErrorMessage(self: *Self, can: bool) *Self {
             if (can) {
-                self.can_send_unknown_error_message_fn = alwaysTrueCanSend(Meta);
+                self.can_send_unknown_error_message_fn = alwaysTrueCanSend(ReqMeta);
             } else {
-                self.can_send_unknown_error_message_fn = alwaysFalseCanSend(Meta);
+                self.can_send_unknown_error_message_fn = alwaysFalseCanSend(ReqMeta);
             }
             return self;
         }
@@ -306,7 +306,7 @@ pub fn Service(comptime Meta: type) type {
             comptime Req: type,
             comptime Resp: type,
             comptime method: *const Method(Req, Resp),
-            comptime impl_fn: *const fn (std.mem.Allocator, Req, Meta) MethodResult(Resp),
+            comptime impl_fn: *const fn (std.mem.Allocator, Req, ReqMeta) MethodResult(Resp),
         ) !*Self {
             const number: i64 = method.number;
             if (self.by_num.contains(number)) {
@@ -325,7 +325,7 @@ pub fn Service(comptime Meta: type) type {
                 .request_type_descriptor_json = req_td_json,
                 .response_type_descriptor_json = resp_td_json,
                 .invoke_fn = struct {
-                    fn invoke(allocator: std.mem.Allocator, request_json: []const u8, keep_unrecognized: bool, readable: bool, meta: Meta) anyerror!InvokeOutcome(Meta) {
+                    fn invoke(allocator: std.mem.Allocator, request_json: []const u8, keep_unrecognized: bool, readable: bool, reqMeta: ReqMeta) anyerror!InvokeOutcome(ReqMeta) {
                         const req = serializerDeserialize(Req, method.request_serializer, allocator, request_json, keep_unrecognized) catch |err| {
                             const msg = try std.fmt.allocPrint(allocator, "bad request: can't parse JSON: {s}", .{@errorName(err)});
                             return .{ .service_error = .{
@@ -334,7 +334,7 @@ pub fn Service(comptime Meta: type) type {
                             } };
                         };
 
-                        switch (impl_fn(allocator, req, meta)) {
+                        switch (impl_fn(allocator, req, reqMeta)) {
                             .ok => |resp| {
                                 const fmt: SerializeFormat = if (readable) .readableJson else .denseJson;
                                 const response_json = try method.response_serializer.serialize(allocator, resp, .{ .format = fmt });
@@ -376,13 +376,13 @@ pub fn Service(comptime Meta: type) type {
 
         /// Parses and dispatches a raw RPC request body.
         ///
-        /// `meta` is the request-context value for this specific HTTP request.
+        /// `reqMeta` is the request-context value for this specific HTTP request.
         /// Build it from your framework request object before calling into the
         /// Skir runtime.
         ///
-        /// In a typical HTTP integration:
-        /// - for POST requests, pass the raw request body;
-        /// - for GET requests, pass the decoded query string (use
+        /// The value passed to `body` must depend on the request type:
+        /// - For POST requests, pass the raw request body text.
+        /// - For GET requests, pass the decoded query payload (use
         ///   `getPercentDecodedQueryFromUrl` to extract it from the request
         ///   target).
         ///
@@ -396,7 +396,7 @@ pub fn Service(comptime Meta: type) type {
         ///
         /// try stream.writeAll(raw_response.status_line);
         /// ```
-        pub fn handleRequest(self: *const Self, allocator: std.mem.Allocator, body: []const u8, meta: Meta) !RawResponse {
+        pub fn handleRequest(self: *const Self, allocator: std.mem.Allocator, body: []const u8, reqMeta: ReqMeta) !RawResponse {
             if (std.mem.eql(u8, body, "") or std.mem.eql(u8, body, "studio")) {
                 return serveStudio(allocator, self.studio_app_js_url);
             }
@@ -406,9 +406,9 @@ pub fn Service(comptime Meta: type) type {
 
             const first = if (body.len > 0) body[0] else ' ';
             if (first == '{' or std.ascii.isWhitespace(first)) {
-                return self.handleJsonRequest(allocator, body, meta);
+                return self.handleJsonRequest(allocator, body, reqMeta);
             }
-            return self.handleColonRequest(allocator, body, meta);
+            return self.handleColonRequest(allocator, body, reqMeta);
         }
 
         fn serveList(self: *const Self, allocator: std.mem.Allocator) !RawResponse {
@@ -459,7 +459,7 @@ pub fn Service(comptime Meta: type) type {
             return RawResponse.okJson(pretty);
         }
 
-        fn handleJsonRequest(self: *const Self, allocator: std.mem.Allocator, body: []const u8, meta: Meta) !RawResponse {
+        fn handleJsonRequest(self: *const Self, allocator: std.mem.Allocator, body: []const u8, reqMeta: ReqMeta) !RawResponse {
             const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch {
                 return RawResponse.badRequest("bad request: invalid JSON");
             };
@@ -494,10 +494,10 @@ pub fn Service(comptime Meta: type) type {
             const request_json = try std.json.Stringify.valueAlloc(allocator, request_val, .{});
             defer allocator.free(request_json);
 
-            return self.invokeEntry(allocator, entry, request_json, self.keep_unrecognized_values, true, meta);
+            return self.invokeEntry(allocator, entry, request_json, self.keep_unrecognized_values, true, reqMeta);
         }
 
-        fn handleColonRequest(self: *const Self, allocator: std.mem.Allocator, body: []const u8, meta: Meta) !RawResponse {
+        fn handleColonRequest(self: *const Self, allocator: std.mem.Allocator, body: []const u8, reqMeta: ReqMeta) !RawResponse {
             var it = std.mem.splitScalar(u8, body, ':');
             const name_str = it.next() orelse return RawResponse.badRequest("bad request: invalid request format");
             const number_str = it.next() orelse return RawResponse.badRequest("bad request: invalid request format");
@@ -522,7 +522,7 @@ pub fn Service(comptime Meta: type) type {
             };
 
             const readable = std.mem.eql(u8, format_str, "readable");
-            return self.invokeEntry(allocator, entry, request_json, self.keep_unrecognized_values, readable, meta);
+            return self.invokeEntry(allocator, entry, request_json, self.keep_unrecognized_values, readable, reqMeta);
         }
 
         fn invokeEntry(
@@ -532,14 +532,14 @@ pub fn Service(comptime Meta: type) type {
             request_json: []const u8,
             keep_unrecognized: bool,
             readable: bool,
-            meta: Meta,
+            reqMeta: ReqMeta,
         ) !RawResponse {
-            const outcome = entry.invoke_fn(allocator, request_json, keep_unrecognized, readable, meta) catch |err| {
+            const outcome = entry.invoke_fn(allocator, request_json, keep_unrecognized, readable, reqMeta) catch |err| {
                 const msg = try std.fmt.allocPrint(allocator, "{s}", .{@errorName(err)});
                 defer allocator.free(msg);
                 const info: ErrorInfo = .{
                     .method_name = entry.name,
-                    .request_meta = meta,
+                    .request_meta = reqMeta,
                     .error_message = msg,
                     .service_error = null,
                 };
@@ -557,7 +557,7 @@ pub fn Service(comptime Meta: type) type {
                 .service_error => |svc| {
                     const info: ErrorInfo = .{
                         .method_name = entry.name,
-                        .request_meta = meta,
+                        .request_meta = reqMeta,
                         .error_message = svc.message,
                         .service_error = svc,
                     };
@@ -571,7 +571,7 @@ pub fn Service(comptime Meta: type) type {
                 .unknown_error => |err_msg| {
                     const info: ErrorInfo = .{
                         .method_name = entry.name,
-                        .request_meta = meta,
+                        .request_meta = reqMeta,
                         .error_message = err_msg,
                         .service_error = null,
                     };
@@ -801,33 +801,33 @@ fn percentDecodeQuery(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     return out.toOwnedSlice(allocator);
 }
 
-fn defaultCanSendUnknownErrorMessage(comptime Meta: type) fn (*const MethodErrorInfo(Meta)) bool {
+fn defaultCanSendUnknownErrorMessage(comptime ReqMeta: type) fn (*const MethodErrorInfo(ReqMeta)) bool {
     return struct {
-        fn f(_: *const MethodErrorInfo(Meta)) bool {
+        fn f(_: *const MethodErrorInfo(ReqMeta)) bool {
             return false;
         }
     }.f;
 }
 
-fn alwaysTrueCanSend(comptime Meta: type) fn (*const MethodErrorInfo(Meta)) bool {
+fn alwaysTrueCanSend(comptime ReqMeta: type) fn (*const MethodErrorInfo(ReqMeta)) bool {
     return struct {
-        fn f(_: *const MethodErrorInfo(Meta)) bool {
+        fn f(_: *const MethodErrorInfo(ReqMeta)) bool {
             return true;
         }
     }.f;
 }
 
-fn alwaysFalseCanSend(comptime Meta: type) fn (*const MethodErrorInfo(Meta)) bool {
+fn alwaysFalseCanSend(comptime ReqMeta: type) fn (*const MethodErrorInfo(ReqMeta)) bool {
     return struct {
-        fn f(_: *const MethodErrorInfo(Meta)) bool {
+        fn f(_: *const MethodErrorInfo(ReqMeta)) bool {
             return false;
         }
     }.f;
 }
 
-fn defaultErrorLogger(comptime Meta: type) fn (*const MethodErrorInfo(Meta)) void {
+fn defaultErrorLogger(comptime ReqMeta: type) fn (*const MethodErrorInfo(ReqMeta)) void {
     return struct {
-        fn f(info: *const MethodErrorInfo(Meta)) void {
+        fn f(info: *const MethodErrorInfo(ReqMeta)) void {
             std.debug.print("skir: error in method {s}: {s}\n", .{ info.method_name, info.error_message });
         }
     }.f;
