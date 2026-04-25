@@ -15,4 +15,5 @@ zig build-lib src/skir_client.zig -femit-docs=docs
 rm -f libskir_client.a
 cd ..
 
+# lsof -ti :8000 | xargs kill
 # cd e2e-test/docs && python3 -m http.server

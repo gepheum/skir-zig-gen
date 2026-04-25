@@ -12,7 +12,7 @@ pub const RpcError = struct {
     message: []const u8,
 };
 
-pub const Header = struct {
+const Header = struct {
     /// Header name.
     key: []const u8,
     /// Header value.
@@ -34,7 +34,7 @@ pub fn RpcResult(comptime T: type) type {
 pub const ServiceClient = struct {
     allocator: std.mem.Allocator,
     service_url: []const u8,
-    default_headers: std.ArrayList(Header),
+    headers: std.ArrayList(Header),
 
     /// Creates a client targeting `service_url`.
     ///
@@ -47,7 +47,7 @@ pub const ServiceClient = struct {
         return .{
             .allocator = allocator,
             .service_url = try allocator.dupe(u8, service_url),
-            .default_headers = .empty,
+            .headers = .empty,
         };
     }
 
@@ -55,19 +55,19 @@ pub const ServiceClient = struct {
     ///
     /// Call once when the client is no longer needed.
     pub fn deinit(self: *ServiceClient) void {
-        for (self.default_headers.items) |h| {
+        for (self.headers.items) |h| {
             self.allocator.free(h.key);
             self.allocator.free(h.value);
         }
-        self.default_headers.deinit(self.allocator);
+        self.headers.deinit(self.allocator);
         self.allocator.free(self.service_url);
     }
 
-    /// Adds a default HTTP header sent with every invocation.
+    /// Adds an HTTP header sent with every invocation.
     ///
     /// Can be chained while setting up the client.
-    pub fn withDefaultHeader(self: *ServiceClient, key: []const u8, value: []const u8) !*ServiceClient {
-        try self.default_headers.append(self.allocator, .{
+    pub fn addHeader(self: *ServiceClient, key: []const u8, value: []const u8) !*ServiceClient {
+        try self.headers.append(self.allocator, .{
             .key = try self.allocator.dupe(u8, key),
             .value = try self.allocator.dupe(u8, value),
         });
@@ -76,8 +76,6 @@ pub const ServiceClient = struct {
 
     /// Invokes a remote method and returns either a decoded response or
     /// `RpcError`.
-    ///
-    /// `extra_headers` are added for this call only.
     ///
     /// The request is serialized using dense JSON. Successful responses are
     /// deserialized while keeping unrecognized values so the client can talk to
@@ -92,14 +90,13 @@ pub const ServiceClient = struct {
     /// var client = try skir_client.ServiceClient.init(allocator, "http://127.0.0.1:18787/myapi");
     /// defer client.deinit();
     ///
-    /// _ = try client.withDefaultHeader("Authorization", "Bearer <token>");
+    /// _ = try client.addHeader("Authorization", "Bearer <token>");
     ///
     /// const result = try client.invokeRemote(
     ///     GetUserRequest,
     ///     GetUserResponse,
     ///     &service_mod.get_user_method(),
     ///     &.{ .user_id = 42, ._unrecognized = null },
-    ///     &.{},
     /// );
     /// ```
     pub fn invokeRemote(
@@ -108,7 +105,6 @@ pub const ServiceClient = struct {
         comptime Resp: type,
         method: *const Method(Req, Resp),
         request: *const Req,
-        extra_headers: []const Header,
     ) !RpcResult(Resp) {
         const request_json = method.request_serializer.serialize(self.allocator, request.*, .{ .format = .denseJson }) catch |err| {
             return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(self.allocator, "failed to encode request: {s}", .{@errorName(err)}) } };
@@ -122,7 +118,7 @@ pub const ServiceClient = struct {
             return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(self.allocator, "invalid service URL: {s}", .{@errorName(err)}) } };
         };
 
-        const response = doHttpPost(self.allocator, parsed, wire_body, self.default_headers.items, extra_headers) catch |err| {
+        const response = doHttpPost(self.allocator, parsed, wire_body, self.headers.items) catch |err| {
             return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(self.allocator, "{s}", .{@errorName(err)}) } };
         };
         defer self.allocator.free(response.content_type);
@@ -181,8 +177,7 @@ fn doHttpPost(
     allocator: std.mem.Allocator,
     parsed: ParsedServiceUrl,
     body: []const u8,
-    default_headers: []const Header,
-    extra_headers: []const Header,
+    headers: []const Header,
 ) !HttpResponse {
     const stream = try std.net.tcpConnectToHost(allocator, parsed.host, parsed.port);
     defer stream.close();
@@ -196,11 +191,7 @@ fn doHttpPost(
     const content_len_line = try std.fmt.bufPrint(&line_buf, "Content-Length: {d}\r\n", .{body.len});
     try stream.writeAll(content_len_line);
     try stream.writeAll("Connection: close\r\n");
-    for (default_headers) |h| {
-        const header_line = try std.fmt.bufPrint(&line_buf, "{s}: {s}\r\n", .{ h.key, h.value });
-        try stream.writeAll(header_line);
-    }
-    for (extra_headers) |h| {
+    for (headers) |h| {
         const header_line = try std.fmt.bufPrint(&line_buf, "{s}: {s}\r\n", .{ h.key, h.value });
         try stream.writeAll(header_line);
     }

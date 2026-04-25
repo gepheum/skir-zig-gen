@@ -42,7 +42,6 @@ pub const stringSerializer = serializers.stringSerializer;
 pub const timestampSerializer = serializers.timestampSerializer;
 
 // RPC service/runtime
-pub const Header = service_client.Header;
 pub const HttpErrorCode = service.HttpErrorCode;
 pub const MethodResult = service.MethodResult;
 pub const RawResponse = service.RawResponse;
