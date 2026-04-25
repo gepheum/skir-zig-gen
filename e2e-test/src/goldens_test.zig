@@ -1,5 +1,6 @@
 const std = @import("std");
 const skir_client = @import("skir_client.zig");
+const type_descriptor = @import("type_descriptor.zig");
 const goldens = @import("skirout/external/gepheum/skir_golden_tests/goldens.zig");
 
 fn containsBytes(candidates: []const []const u8, actual: []const u8) bool {
@@ -348,7 +349,7 @@ fn typedValueTypeDescriptorJson(tv: *const goldens.TypedValue, allocator: std.me
         .RecEnum => goldens.RecEnum.serializer().typeDescriptor(),
         else => return error.UnsupportedTypedValueVariant,
     };
-    return skir_client.typeDescriptorToJson(allocator, td);
+    return try type_descriptor.typeDescriptorToJson(allocator, td);
 }
 
 fn verifyBytesEqual(a: *const goldens.Assertion.BytesEqual_, allocator: std.mem.Allocator) !void {
@@ -522,7 +523,7 @@ fn verifyReserializeValue(input: *const goldens.Assertion.ReserializeValue_, all
         try std.testing.expectEqualStrings(expected_td, actual_td);
 
         const parsed = try skir_client.typeDescriptorFromJson(allocator, expected_td);
-        const reparsed = try skir_client.typeDescriptorToJson(allocator, parsed);
+        const reparsed = try type_descriptor.typeDescriptorToJson(allocator, parsed);
         try std.testing.expectEqualStrings(expected_td, reparsed);
     }
 }

@@ -14,3 +14,5 @@ zig build test -Doptimize=ReleaseSafe
 zig build-lib src/skir_client.zig -femit-docs=docs
 rm -f libskir_client.a
 cd ..
+
+# cd e2e-test/docs && python3 -m http.server

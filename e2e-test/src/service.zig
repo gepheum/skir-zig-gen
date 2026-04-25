@@ -702,7 +702,7 @@ fn statusLine(code: u16) []const u8 {
     };
 }
 
-pub fn httpStatusText(code: HttpErrorCode) []const u8 {
+fn httpStatusText(code: HttpErrorCode) []const u8 {
     return switch (code) {
         ._400_BadRequest => "Bad Request",
         ._401_Unauthorized => "Unauthorized",

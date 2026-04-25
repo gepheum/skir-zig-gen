@@ -51,7 +51,6 @@ pub const RpcResult = service_client.RpcResult;
 pub const Service = service.Service;
 pub const ServiceClient = service_client.ServiceClient;
 pub const ServiceError = service.ServiceError;
-pub const httpStatusText = service.httpStatusText;
 pub const getPercentDecodedQueryFromUrl = service.getPercentDecodedQueryFromUrl;
 
 // Type descriptors
@@ -65,12 +64,11 @@ pub const StructDescriptor = type_descriptor.StructDescriptor;
 pub const StructField = type_descriptor.StructField;
 pub const TypeDescriptor = type_descriptor.TypeDescriptor;
 pub const typeDescriptorFromJson = type_descriptor.typeDescriptorFromJson;
-pub const typeDescriptorToJson = type_descriptor.typeDescriptorToJson;
 
 // Internal hooks (generated/runtime internals)
 pub const _EnumAdapter = enum_adapter.EnumAdapter;
-pub const _enumSerializerFromStatic = enum_adapter.enumSerializerFromStatic;
+pub const _enumSerializerFromStatic = enum_adapter._enumSerializerFromStatic;
 pub const _StructAdapter = struct_adapter.StructAdapter;
 pub const _SerializerVTable = core._SerializerVTable;
 pub const _serializerFromAdapter = core._serializerFromAdapter;
-pub const _structSerializerFromStatic = struct_adapter.structSerializerFromStatic;
+pub const _structSerializerFromStatic = struct_adapter._structSerializerFromStatic;

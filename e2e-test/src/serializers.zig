@@ -682,16 +682,10 @@ pub fn stringSerializer() Serializer([]const u8) {
     return _serializerFromAdapter([]const u8, StringAdapter);
 }
 /// Returns a `Serializer` for raw byte blobs (`[]const u8`).
-///
-/// Unlike `stringSerializer`, byte values are base64-encoded in JSON rather
-/// than written as a UTF-8 string.
 pub fn bytesSerializer() Serializer([]const u8) {
     return _serializerFromAdapter([]const u8, BytesAdapter);
 }
 /// Returns a `Serializer` for `Timestamp` values.
-///
-/// JSON representation: RFC 3339 string (e.g. `"2024-01-15T12:00:00Z"`).
-/// Wire encoding: 8-byte little-endian Unix microseconds.
 pub fn timestampSerializer() Serializer(Timestamp) {
     return _serializerFromAdapter(Timestamp, TimestampAdapter);
 }

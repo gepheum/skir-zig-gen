@@ -768,7 +768,7 @@ pub fn EnumAdapter(comptime T: type) type {
     };
 }
 
-pub fn enumSerializerFromStatic(comptime T: type, comptime get_adapter: *const fn () *EnumAdapter(T)) s.Serializer(T) {
+pub fn _enumSerializerFromStatic(comptime T: type, comptime get_adapter: *const fn () *EnumAdapter(T)) s.Serializer(T) {
     const Impl = struct {
         pub fn isDefault(_: @This(), input: T) bool {
             return get_adapter().isDefault(&input);

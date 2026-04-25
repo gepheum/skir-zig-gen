@@ -601,7 +601,7 @@ pub fn StructAdapter(comptime T: type) type {
     };
 }
 
-pub fn structSerializerFromStatic(comptime T: type, comptime get_adapter: *const fn () *StructAdapter(T)) s.Serializer(T) {
+pub fn _structSerializerFromStatic(comptime T: type, comptime get_adapter: *const fn () *StructAdapter(T)) s.Serializer(T) {
     const Impl = struct {
         pub fn isDefault(_: @This(), input: T) bool {
             return get_adapter().isDefault(&input);
