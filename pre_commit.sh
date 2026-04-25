@@ -11,4 +11,6 @@ cd e2e-test
 zig fmt src/root.zig src/skir_client.zig build.zig
 zig build test -Doptimize=Debug
 zig build test -Doptimize=ReleaseSafe
+zig build-lib src/skir_client.zig -femit-docs=docs
+rm -f libskir_client.a
 cd ..

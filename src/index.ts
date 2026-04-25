@@ -1,5 +1,3 @@
-// TODO: comments
-// TODO: understand service...
 import {
   unquoteAndUnescape,
   type CodeGenerator,

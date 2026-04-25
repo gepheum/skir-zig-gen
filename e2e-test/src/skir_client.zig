@@ -22,8 +22,8 @@ pub const Recursive = recursive.Recursive;
 pub const SerializeFormat = core.SerializeFormat;
 pub const Serializer = core.Serializer;
 pub const Timestamp = timestamp.Timestamp;
-pub const UnrecognizedFields = unrecognized.UnrecognizedFields;
-pub const UnrecognizedVariant = unrecognized.UnrecognizedVariant;
+pub const _UnrecognizedFields = unrecognized.UnrecognizedFields;
+pub const _UnrecognizedVariant = unrecognized.UnrecognizedVariant;
 
 // Serializer factories
 pub const arraySerializer = serializers.arraySerializer;

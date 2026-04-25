@@ -1,11 +1,13 @@
 .DS_Store
 .gradle
 .idea
+.zig-cache
 build
 dist
+libskir_client.a
 node_modules
 skir-external
 skirout
 tsconfig.tsbuildinfo
-.zig-cache
 zig-out
+e2e-test/docs
