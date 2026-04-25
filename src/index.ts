@@ -478,8 +478,7 @@ class ZigSourceFileGenerator {
           payloadType = `?*const ${innerType}`;
           serializerExpr = `skir_client.optionalSerializer(skir_client.pointerSerializer(${innerType}, ${this.getSerializerExpr(pk.innerType, { maybeInitializingSameModule: true })}))`;
         } else {
-          const rawType = this.typeSpeller.getZigType(variant.type);
-          payloadType = rawType;
+          payloadType = this.typeSpeller.getZigType(variant.type);
           serializerExpr = this.getSerializerExpr(variant.type, {
             maybeInitializingSameModule: true,
           });
