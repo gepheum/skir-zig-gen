@@ -83,106 +83,106 @@ fn evaluateTypedValue(tv: *const goldens.TypedValue, allocator: std.mem.Allocato
 
         .PointFromJsonKeepUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.Point.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.Point, goldens.Point.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
             return .{ .Point = value };
         },
         .PointFromJsonDropUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.Point.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.Point, goldens.Point.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
             return .{ .Point = value };
         },
         .PointFromBytesKeepUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.Point.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.Point, goldens.Point.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
             return .{ .Point = value };
         },
         .PointFromBytesDropUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.Point.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.Point, goldens.Point.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
             return .{ .Point = value };
         },
 
         .ColorFromJsonKeepUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.Color.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.Color, goldens.Color.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
             return .{ .Color = value };
         },
         .ColorFromJsonDropUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.Color.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.Color, goldens.Color.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
             return .{ .Color = value };
         },
         .ColorFromBytesKeepUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.Color.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.Color, goldens.Color.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
             return .{ .Color = value };
         },
         .ColorFromBytesDropUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.Color.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.Color, goldens.Color.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
             return .{ .Color = value };
         },
 
         .MyEnumFromJsonKeepUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.MyEnum.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.MyEnum, goldens.MyEnum.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
             return .{ .MyEnum = value };
         },
         .MyEnumFromJsonDropUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.MyEnum.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.MyEnum, goldens.MyEnum.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
             return .{ .MyEnum = value };
         },
         .MyEnumFromBytesKeepUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.MyEnum.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.MyEnum, goldens.MyEnum.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
             return .{ .MyEnum = value };
         },
         .MyEnumFromBytesDropUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.MyEnum.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.MyEnum, goldens.MyEnum.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
             return .{ .MyEnum = value };
         },
 
         .EnumAFromJsonKeepUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.EnumA.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.EnumA, goldens.EnumA.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
             return .{ .EnumA = value };
         },
         .EnumAFromJsonDropUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.EnumA.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.EnumA, goldens.EnumA.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
             return .{ .EnumA = value };
         },
         .EnumAFromBytesKeepUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.EnumA.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.EnumA, goldens.EnumA.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
             return .{ .EnumA = value };
         },
         .EnumAFromBytesDropUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.EnumA.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.EnumA, goldens.EnumA.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
             return .{ .EnumA = value };
         },
 
         .EnumBFromJsonKeepUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.EnumB.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.EnumB, goldens.EnumB.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = true });
             return .{ .EnumB = value };
         },
         .EnumBFromJsonDropUnrecognized => |expr| {
             const json = try evaluateString(expr, allocator);
-            const value = try goldens.EnumB.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.EnumB, goldens.EnumB.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = false });
             return .{ .EnumB = value };
         },
         .EnumBFromBytesKeepUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.EnumB.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
+            const value = try skir_client.pointerSerializer(goldens.EnumB, goldens.EnumB.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = true });
             return .{ .EnumB = value };
         },
         .EnumBFromBytesDropUnrecognized => |expr| {
             const bytes = try evaluateBytes(expr, allocator);
-            const value = try goldens.EnumB.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
+            const value = try skir_client.pointerSerializer(goldens.EnumB, goldens.EnumB.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = false });
             return .{ .EnumB = value };
         },
 
@@ -203,14 +203,14 @@ fn typedValueToDenseJson(tv: *const goldens.TypedValue, allocator: std.mem.Alloc
         .Bytes => |v| try skir_client.bytesSerializer().serialize(allocator, v, .{ .format = .denseJson }),
         .BoolOptional => |v| try skir_client.optionalSerializer(skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .denseJson }),
         .Ints => |v| try skir_client.arraySerializer(skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .denseJson }),
-        .Point => |v| try goldens.Point.serializer().serialize(allocator, v, .{ .format = .denseJson }),
-        .Color => |v| try goldens.Color.serializer().serialize(allocator, v, .{ .format = .denseJson }),
-        .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v, .{ .format = .denseJson }),
-        .EnumA => |v| try goldens.EnumA.serializer().serialize(allocator, v, .{ .format = .denseJson }),
-        .EnumB => |v| try goldens.EnumB.serializer().serialize(allocator, v, .{ .format = .denseJson }),
-        .KeyedArrays => |v| try goldens.KeyedArrays.serializer().serialize(allocator, v, .{ .format = .denseJson }),
-        .RecStruct => |v| try goldens.RecStruct.serializer().serialize(allocator, v, .{ .format = .denseJson }),
-        .RecEnum => |v| try goldens.RecEnum.serializer().serialize(allocator, v, .{ .format = .denseJson }),
+        .Point => |v| try goldens.Point.serializer().serialize(allocator, v.*, .{ .format = .denseJson }),
+        .Color => |v| try goldens.Color.serializer().serialize(allocator, v.*, .{ .format = .denseJson }),
+        .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v.*, .{ .format = .denseJson }),
+        .EnumA => |v| try goldens.EnumA.serializer().serialize(allocator, v.*, .{ .format = .denseJson }),
+        .EnumB => |v| try goldens.EnumB.serializer().serialize(allocator, v.*, .{ .format = .denseJson }),
+        .KeyedArrays => |v| try goldens.KeyedArrays.serializer().serialize(allocator, v.*, .{ .format = .denseJson }),
+        .RecStruct => |v| try goldens.RecStruct.serializer().serialize(allocator, v.*, .{ .format = .denseJson }),
+        .RecEnum => |v| try goldens.RecEnum.serializer().serialize(allocator, v.*, .{ .format = .denseJson }),
         else => error.UnsupportedTypedValueVariant,
     };
 }
@@ -228,14 +228,14 @@ fn typedValueToReadableJson(tv: *const goldens.TypedValue, allocator: std.mem.Al
         .Bytes => |v| try skir_client.bytesSerializer().serialize(allocator, v, .{ .format = .readableJson }),
         .BoolOptional => |v| try skir_client.optionalSerializer(skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .readableJson }),
         .Ints => |v| try skir_client.arraySerializer(skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .readableJson }),
-        .Point => |v| try goldens.Point.serializer().serialize(allocator, v, .{ .format = .readableJson }),
-        .Color => |v| try goldens.Color.serializer().serialize(allocator, v, .{ .format = .readableJson }),
-        .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v, .{ .format = .readableJson }),
-        .EnumA => |v| try goldens.EnumA.serializer().serialize(allocator, v, .{ .format = .readableJson }),
-        .EnumB => |v| try goldens.EnumB.serializer().serialize(allocator, v, .{ .format = .readableJson }),
-        .KeyedArrays => |v| try goldens.KeyedArrays.serializer().serialize(allocator, v, .{ .format = .readableJson }),
-        .RecStruct => |v| try goldens.RecStruct.serializer().serialize(allocator, v, .{ .format = .readableJson }),
-        .RecEnum => |v| try goldens.RecEnum.serializer().serialize(allocator, v, .{ .format = .readableJson }),
+        .Point => |v| try goldens.Point.serializer().serialize(allocator, v.*, .{ .format = .readableJson }),
+        .Color => |v| try goldens.Color.serializer().serialize(allocator, v.*, .{ .format = .readableJson }),
+        .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v.*, .{ .format = .readableJson }),
+        .EnumA => |v| try goldens.EnumA.serializer().serialize(allocator, v.*, .{ .format = .readableJson }),
+        .EnumB => |v| try goldens.EnumB.serializer().serialize(allocator, v.*, .{ .format = .readableJson }),
+        .KeyedArrays => |v| try goldens.KeyedArrays.serializer().serialize(allocator, v.*, .{ .format = .readableJson }),
+        .RecStruct => |v| try goldens.RecStruct.serializer().serialize(allocator, v.*, .{ .format = .readableJson }),
+        .RecEnum => |v| try goldens.RecEnum.serializer().serialize(allocator, v.*, .{ .format = .readableJson }),
         else => error.UnsupportedTypedValueVariant,
     };
 }
@@ -253,14 +253,14 @@ fn typedValueToBytes(tv: *const goldens.TypedValue, allocator: std.mem.Allocator
         .Bytes => |v| try skir_client.bytesSerializer().serialize(allocator, v, .{ .format = .binary }),
         .BoolOptional => |v| try skir_client.optionalSerializer(skir_client.boolSerializer()).serialize(allocator, v, .{ .format = .binary }),
         .Ints => |v| try skir_client.arraySerializer(skir_client.int32Serializer()).serialize(allocator, v, .{ .format = .binary }),
-        .Point => |v| try goldens.Point.serializer().serialize(allocator, v, .{ .format = .binary }),
-        .Color => |v| try goldens.Color.serializer().serialize(allocator, v, .{ .format = .binary }),
-        .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v, .{ .format = .binary }),
-        .EnumA => |v| try goldens.EnumA.serializer().serialize(allocator, v, .{ .format = .binary }),
-        .EnumB => |v| try goldens.EnumB.serializer().serialize(allocator, v, .{ .format = .binary }),
-        .KeyedArrays => |v| try goldens.KeyedArrays.serializer().serialize(allocator, v, .{ .format = .binary }),
-        .RecStruct => |v| try goldens.RecStruct.serializer().serialize(allocator, v, .{ .format = .binary }),
-        .RecEnum => |v| try goldens.RecEnum.serializer().serialize(allocator, v, .{ .format = .binary }),
+        .Point => |v| try goldens.Point.serializer().serialize(allocator, v.*, .{ .format = .binary }),
+        .Color => |v| try goldens.Color.serializer().serialize(allocator, v.*, .{ .format = .binary }),
+        .MyEnum => |v| try goldens.MyEnum.serializer().serialize(allocator, v.*, .{ .format = .binary }),
+        .EnumA => |v| try goldens.EnumA.serializer().serialize(allocator, v.*, .{ .format = .binary }),
+        .EnumB => |v| try goldens.EnumB.serializer().serialize(allocator, v.*, .{ .format = .binary }),
+        .KeyedArrays => |v| try goldens.KeyedArrays.serializer().serialize(allocator, v.*, .{ .format = .binary }),
+        .RecStruct => |v| try goldens.RecStruct.serializer().serialize(allocator, v.*, .{ .format = .binary }),
+        .RecEnum => |v| try goldens.RecEnum.serializer().serialize(allocator, v.*, .{ .format = .binary }),
         else => error.UnsupportedTypedValueVariant,
     };
 }
@@ -283,14 +283,14 @@ fn typedValueFromJson(
         .Bytes => .{ .Bytes = try skir_client.bytesSerializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .BoolOptional => .{ .BoolOptional = try skir_client.optionalSerializer(skir_client.boolSerializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Ints => .{ .Ints = try skir_client.arraySerializer(skir_client.int32Serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .Point => .{ .Point = try goldens.Point.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .Color => .{ .Color = try goldens.Color.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .MyEnum => .{ .MyEnum = try goldens.MyEnum.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .EnumA => .{ .EnumA = try goldens.EnumA.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .EnumB => .{ .EnumB = try goldens.EnumB.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .KeyedArrays => .{ .KeyedArrays = try goldens.KeyedArrays.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .RecStruct => .{ .RecStruct = try goldens.RecStruct.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .RecEnum => .{ .RecEnum = try goldens.RecEnum.serializer().deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .Point => .{ .Point = try skir_client.pointerSerializer(goldens.Point, goldens.Point.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .Color => .{ .Color = try skir_client.pointerSerializer(goldens.Color, goldens.Color.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .MyEnum => .{ .MyEnum = try skir_client.pointerSerializer(goldens.MyEnum, goldens.MyEnum.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .EnumA => .{ .EnumA = try skir_client.pointerSerializer(goldens.EnumA, goldens.EnumA.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .EnumB => .{ .EnumB = try skir_client.pointerSerializer(goldens.EnumB, goldens.EnumB.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .KeyedArrays => .{ .KeyedArrays = try skir_client.pointerSerializer(goldens.KeyedArrays, goldens.KeyedArrays.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .RecStruct => .{ .RecStruct = try skir_client.pointerSerializer(goldens.RecStruct, goldens.RecStruct.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .RecEnum => .{ .RecEnum = try skir_client.pointerSerializer(goldens.RecEnum, goldens.RecEnum.serializer()).deserialize(allocator, json, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         else => error.UnsupportedTypedValueVariant,
     };
 }
@@ -313,14 +313,14 @@ fn typedValueFromBytes(
         .Bytes => .{ .Bytes = try skir_client.bytesSerializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .BoolOptional => .{ .BoolOptional = try skir_client.optionalSerializer(skir_client.boolSerializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         .Ints => .{ .Ints = try skir_client.arraySerializer(skir_client.int32Serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .Point => .{ .Point = try goldens.Point.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .Color => .{ .Color = try goldens.Color.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .MyEnum => .{ .MyEnum = try goldens.MyEnum.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .EnumA => .{ .EnumA = try goldens.EnumA.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .EnumB => .{ .EnumB = try goldens.EnumB.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .KeyedArrays => .{ .KeyedArrays = try goldens.KeyedArrays.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .RecStruct => .{ .RecStruct = try goldens.RecStruct.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
-        .RecEnum => .{ .RecEnum = try goldens.RecEnum.serializer().deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .Point => .{ .Point = try skir_client.pointerSerializer(goldens.Point, goldens.Point.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .Color => .{ .Color = try skir_client.pointerSerializer(goldens.Color, goldens.Color.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .MyEnum => .{ .MyEnum = try skir_client.pointerSerializer(goldens.MyEnum, goldens.MyEnum.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .EnumA => .{ .EnumA = try skir_client.pointerSerializer(goldens.EnumA, goldens.EnumA.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .EnumB => .{ .EnumB = try skir_client.pointerSerializer(goldens.EnumB, goldens.EnumB.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .KeyedArrays => .{ .KeyedArrays = try skir_client.pointerSerializer(goldens.KeyedArrays, goldens.KeyedArrays.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .RecStruct => .{ .RecStruct = try skir_client.pointerSerializer(goldens.RecStruct, goldens.RecStruct.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
+        .RecEnum => .{ .RecEnum = try skir_client.pointerSerializer(goldens.RecEnum, goldens.RecEnum.serializer()).deserialize(allocator, bytes, .{ .keepUnrecognizedValues = keep_unrecognized }) },
         else => error.UnsupportedTypedValueVariant,
     };
 }
@@ -529,17 +529,17 @@ fn verifyReserializeValue(input: *const goldens.Assertion.ReserializeValue_, all
 
 fn verifyAssertion(assertion: *const goldens.Assertion, allocator: std.mem.Allocator) !void {
     switch (assertion.*) {
-        .BytesEqual => |a| try verifyBytesEqual(&a, allocator),
-        .BytesIn => |a| try verifyBytesIn(&a, allocator),
-        .StringEqual => |a| try verifyStringEqual(&a, allocator),
-        .StringIn => |a| try verifyStringIn(&a, allocator),
-        .ReserializeValue => |a| try verifyReserializeValue(&a, allocator),
-        .ReserializeLargeString => |a| try verifyReserializeLargeString(&a, allocator),
-        .ReserializeLargeArray => |a| try verifyReserializeLargeArray(&a, allocator),
-        .EnumAFromJsonIsConstant => |a| try verifyEnumAFromJsonIsConstant(&a, allocator),
-        .EnumAFromBytesIsConstant => |a| try verifyEnumAFromBytesIsConstant(&a, allocator),
-        .EnumBFromJsonIsWrapperB => |a| try verifyEnumBFromJsonIsWrapperB(&a, allocator),
-        .EnumBFromBytesIsWrapperB => |a| try verifyEnumBFromBytesIsWrapperB(&a, allocator),
+        .BytesEqual => |a| try verifyBytesEqual(a, allocator),
+        .BytesIn => |a| try verifyBytesIn(a, allocator),
+        .StringEqual => |a| try verifyStringEqual(a, allocator),
+        .StringIn => |a| try verifyStringIn(a, allocator),
+        .ReserializeValue => |a| try verifyReserializeValue(a, allocator),
+        .ReserializeLargeString => |a| try verifyReserializeLargeString(a, allocator),
+        .ReserializeLargeArray => |a| try verifyReserializeLargeArray(a, allocator),
+        .EnumAFromJsonIsConstant => |a| try verifyEnumAFromJsonIsConstant(a, allocator),
+        .EnumAFromBytesIsConstant => |a| try verifyEnumAFromBytesIsConstant(a, allocator),
+        .EnumBFromJsonIsWrapperB => |a| try verifyEnumBFromJsonIsWrapperB(a, allocator),
+        .EnumBFromBytesIsWrapperB => |a| try verifyEnumBFromBytesIsWrapperB(a, allocator),
         .Unknown => return error.UnknownAssertion,
     }
 }

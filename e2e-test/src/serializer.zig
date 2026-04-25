@@ -47,9 +47,6 @@ pub fn _SerializerVTable(comptime T: type) type {
 /// const req_copy = try method.request_serializer.deserialize(allocator, req_json, .{});
 /// _ = req_copy;
 /// ```
-///
-/// For primitive serializers the vtable points to comptime-generated constants,
-/// so the `Serializer` is a thin single-pointer value with no heap allocation.
 pub fn Serializer(comptime T: type) type {
     return struct {
         const Self = @This();

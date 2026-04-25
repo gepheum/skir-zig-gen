@@ -1,4 +1,5 @@
 import type {
+  Field,
   FieldPath,
   Primitive,
   PrimitiveType,
@@ -32,8 +33,12 @@ export class TypeSpeller {
         const typeName = getTypeName(recordLocation);
         if (recordLocation.modulePath === this.modulePath) {
           return typeName;
+        } else {
+          const importAlias = modulePathToImportAlias(
+            recordLocation.modulePath,
+          );
+          return `${importAlias}.${typeName}`;
         }
-        return `${modulePathToImportAlias(recordLocation.modulePath)}.${typeName}`;
       }
       case "array": {
         const keyedSpecName =
@@ -43,8 +48,9 @@ export class TypeSpeller {
             : undefined);
         if (keyedSpecName) {
           return `skir_client.KeyedArray(${keyedSpecName})`;
+        } else {
+          return `[]const ${this.getZigType(type.item)}`;
         }
-        return `[]const ${this.getZigType(type.item)}`;
       }
       case "optional":
         return `?${this.getZigType(type.other, options)}`;
@@ -82,6 +88,21 @@ export class TypeSpeller {
     }
   }
 
+  getZigFieldType(field: Field): string {
+    switch (field.isRecursive) {
+      case "hard":
+        return `skir_client.Recursive(${this.getZigType(field.type!)})`;
+      case "via-optional": {
+        // field.type is ?T; we want ?*const T (not ?*const ?T)
+        const innerType =
+          field.type!.kind === "optional" ? field.type!.other : field.type!;
+        return `?*const ${this.getZigType(innerType)}`;
+      }
+      default:
+        return this.getZigType(field.type!);
+    }
+  }
+
   getKeyType(keyType: PrimitiveType | ResolvedRecordRef): string {
     if (keyType.kind === "primitive") {
       return primitiveToZigType(keyType.primitive);
@@ -112,7 +133,7 @@ export class TypeSpeller {
         continue;
       }
 
-      if (part.declaration?.isRecursive) {
+      if (part.declaration?.isRecursive === "hard") {
         expr = `${expr}.${toFieldGetterName(part.name.text)}()`;
       } else {
         expr = `${expr}.${toStructFieldName(part.name.text)}`;

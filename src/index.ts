@@ -1,5 +1,3 @@
-// TODO: recursive fields, no _ prefix?
-
 import {
   unquoteAndUnescape,
   type CodeGenerator,
@@ -7,6 +5,7 @@ import {
   type Field,
   type Method,
   type Module,
+  type ObjectEntry,
   type Record,
   type RecordKey,
   type RecordLocation,
@@ -20,7 +19,6 @@ import {
   modulePathToImportAlias,
   modulePathToOutputPath,
   toConstantName,
-  toFieldGetterName,
   toMethodFnName,
   toStructFieldName,
   toVariantName,
@@ -214,28 +212,19 @@ class ZigSourceFileGenerator {
     this.push(`\n`);
     this.push(`pub const default: @This() = .{\n`);
     for (const field of loc.record.fields) {
-      if (field.isRecursive !== false) {
-        this.push(
-          `.${this.getRecursiveStorageName(field)} = .default_value,\n`,
-        );
+      const fieldName = toStructFieldName(field.name.text);
+      if (field.isRecursive === "hard") {
+        this.push(`.${fieldName} = .default_value,\n`);
+      } else if (field.isRecursive === "via-optional") {
+        this.push(`.${fieldName} = null,\n`);
       } else {
         this.push(
-          `.${toStructFieldName(field.name.text)} = ${this.typeSpeller.getDefaultExpr(field.type!)},\n`,
+          `.${fieldName} = ${this.typeSpeller.getDefaultExpr(field.type!)},\n`,
         );
       }
     }
     this.push(`._unrecognized = null,\n`);
     this.push(`};\n`);
-
-    const recursiveFields = loc.record.fields.filter(
-      (field) => field.isRecursive !== false,
-    );
-    if (recursiveFields.length > 0) {
-      for (const field of recursiveFields) {
-        this.push(`\n`);
-        this.writeRecursiveFieldGetter(field);
-      }
-    }
 
     this.push(`\n`);
     this.writeStructSerializer(loc, typeName);
@@ -269,10 +258,15 @@ class ZigSourceFileGenerator {
     for (const variant of loc.record.fields) {
       this.push(commentify(docToCommentText(variant.doc)));
       if (variant.type) {
-        const variantType =
-          variant.isRecursive !== false
-            ? `*const ${this.typeSpeller.getZigType(variant.type)}`
-            : this.typeSpeller.getZigType(variant.type);
+        const pk = this.enumVariantPointerKind(variant.type);
+        let variantType: string;
+        if (pk.kind === "pointer") {
+          variantType = `*const ${this.typeSpeller.getZigType(variant.type)}`;
+        } else if (pk.kind === "optional-pointer") {
+          variantType = `?*const ${this.typeSpeller.getZigType(pk.innerType)}`;
+        } else {
+          variantType = this.typeSpeller.getZigType(variant.type);
+        }
         this.push(`${toVariantName(variant.name.text)}: ${variantType},\n`);
       } else {
         this.push(`${toVariantName(variant.name.text)},\n`);
@@ -315,34 +309,10 @@ class ZigSourceFileGenerator {
 
   private writeStructField(field: Field): void {
     const comment = commentify(docToCommentText(field.doc));
-
-    if (field.isRecursive !== false) {
-      const storageName = this.getRecursiveStorageName(field);
-      const rawType = this.typeSpeller.getZigType(field.type!);
-      this.push(comment);
-      this.push(`${storageName}: skir_client.Recursive(${rawType}),\n`);
-      return;
-    }
-
     const fieldName = toStructFieldName(field.name.text);
-    const fieldType = this.typeSpeller.getZigType(field.type!);
+    const fieldType = this.typeSpeller.getZigFieldType(field);
     this.push(comment);
     this.push(`${fieldName}: ${fieldType},\n`);
-  }
-
-  private writeRecursiveFieldGetter(field: Field): void {
-    const getterName = toFieldGetterName(field);
-    const storageName = this.getRecursiveStorageName(field);
-    const returnType = this.typeSpeller.getZigType(field.type!);
-    const defaultExpr = this.typeSpeller.getDefaultExpr(field.type!);
-
-    this.push(commentify(docToCommentText(field.doc)));
-    this.push(`pub fn ${getterName}(self: *const @This()) ${returnType} {\n`);
-    this.push(`return switch (self.${storageName}) {\n`);
-    this.push(`.default_value => ${defaultExpr},\n`);
-    this.push(`.value => |value| value.*,\n`);
-    this.push(`};\n`);
-    this.push(`}\n`);
   }
 
   private writeStructSerializer(loc: RecordLocation, _typeName: string): void {
@@ -360,13 +330,13 @@ class ZigSourceFileGenerator {
 
     this.push(`fn _adapterNoLock() *skir_client._StructAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
-    this.push(`const Holder = struct {\n`);
+    this.push(`const _Holder = struct {\n`);
     this.push(`var state: u8 = 0;\n`);
     this.push(`var adapter: skir_client._StructAdapter(S) = undefined;\n`);
     this.push(`};\n`);
-    this.push(`if (Holder.state != 0) return &Holder.adapter;\n`);
-    this.push(`Holder.state = 1;\n`);
-    this.push(`Holder.adapter = skir_client._StructAdapter(S).init(\n`);
+    this.push(`if (_Holder.state != 0) return &_Holder.adapter;\n`);
+    this.push(`_Holder.state = 1;\n`);
+    this.push(`_Holder.adapter = skir_client._StructAdapter(S).init(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
     this.push(`${toZigStringLiteral(qualifiedName)},\n`);
@@ -381,54 +351,33 @@ class ZigSourceFileGenerator {
 
     for (const removedNumber of loc.record.removedNumbers) {
       this.push(
-        `Holder.adapter.addRemovedNumber(${removedNumber}) catch unreachable;\n`,
+        `_Holder.adapter.addRemovedNumber(${removedNumber}) catch unreachable;\n`,
       );
     }
 
     for (const field of loc.record.fields) {
       const doc = toZigStringLiteral(docToCommentText(field.doc));
-      if (field.isRecursive !== false) {
-        const storageName = this.getRecursiveStorageName(field);
-        const rawType = this.typeSpeller.getZigType(field.type!);
-        const storageType = `skir_client.Recursive(${rawType})`;
-        const fieldSerializer = `skir_client.recursiveSerializer(${rawType}, ${this.getSerializerExpr(field.type!, { maybeInitializingSameModule: true })})`;
-        this.push(`Holder.adapter.addField(\n`);
-        this.push(`${storageType},\n`);
-        this.push(`${toZigStringLiteral(field.name.text)},\n`);
-        this.push(`${field.number},\n`);
-        this.push(`${fieldSerializer},\n`);
-        this.push(`${doc},\n`);
-        this.push(
-          `struct { fn get(x: *const S) ${storageType} { return x.${storageName}; } }.get,\n`,
-        );
-        this.push(
-          `struct { fn set(x: *S, v: ${storageType}) void { x.${storageName} = v; } }.set,\n`,
-        );
-        this.push(`) catch unreachable;\n`);
-      } else {
-        const fieldName = toStructFieldName(field.name.text);
-        const fieldType = this.typeSpeller.getZigType(field.type!);
-        this.push(`Holder.adapter.addField(\n`);
-        this.push(`${fieldType},\n`);
-        this.push(`${toZigStringLiteral(field.name.text)},\n`);
-        this.push(`${field.number},\n`);
-        this.push(
-          `${this.getSerializerExpr(field.type!, { maybeInitializingSameModule: true })},\n`,
-        );
-        this.push(`${doc},\n`);
-        this.push(
-          `struct { fn get(x: *const S) ${fieldType} { return x.${fieldName}; } }.get,\n`,
-        );
-        this.push(
-          `struct { fn set(x: *S, v: ${fieldType}) void { x.${fieldName} = v; } }.set,\n`,
-        );
-        this.push(`) catch unreachable;\n`);
-      }
+      const fieldName = toStructFieldName(field.name.text);
+      const fieldType = this.typeSpeller.getZigFieldType(field);
+      const fieldSerializer = this.getFieldSerializerExpr(field);
+      this.push(`_Holder.adapter.addField(\n`);
+      this.push(`${fieldType},\n`);
+      this.push(`${toZigStringLiteral(field.name.text)},\n`);
+      this.push(`${field.number},\n`);
+      this.push(`${fieldSerializer},\n`);
+      this.push(`${doc},\n`);
+      this.push(
+        `struct { fn get(x: *const S) ${fieldType} { return x.${fieldName}; } }.get,\n`,
+      );
+      this.push(
+        `struct { fn set(x: *S, v: ${fieldType}) void { x.${fieldName} = v; } }.set,\n`,
+      );
+      this.push(`) catch unreachable;\n`);
     }
 
-    this.push(`Holder.adapter.finalize() catch unreachable;\n`);
-    this.push(`Holder.state = 2;\n`);
-    this.push(`return &Holder.adapter;\n`);
+    this.push(`_Holder.adapter.finalize() catch unreachable;\n`);
+    this.push(`_Holder.state = 2;\n`);
+    this.push(`return &_Holder.adapter;\n`);
     this.push(`}\n`);
 
     this.push(`\n`);
@@ -468,13 +417,13 @@ class ZigSourceFileGenerator {
 
     this.push(`fn _adapterNoLock() *skir_client._EnumAdapter(@This()) {\n`);
     this.push(`const S = @This();\n`);
-    this.push(`const Holder = struct {\n`);
+    this.push(`const _Holder = struct {\n`);
     this.push(`var state: u8 = 0;\n`);
     this.push(`var adapter: skir_client._EnumAdapter(S) = undefined;\n`);
     this.push(`};\n`);
-    this.push(`if (Holder.state != 0) return &Holder.adapter;\n`);
-    this.push(`Holder.state = 1;\n`);
-    this.push(`Holder.adapter = skir_client._EnumAdapter(S).init(\n`);
+    this.push(`if (_Holder.state != 0) return &_Holder.adapter;\n`);
+    this.push(`_Holder.state = 1;\n`);
+    this.push(`_Holder.adapter = skir_client._EnumAdapter(S).init(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(this.inModule.path)},\n`);
     this.push(`${toZigStringLiteral(qualifiedName)},\n`);
@@ -508,7 +457,7 @@ class ZigSourceFileGenerator {
 
     for (const removedNumber of loc.record.removedNumbers) {
       this.push(
-        `Holder.adapter.addRemovedNumber(${removedNumber}) catch unreachable;\n`,
+        `_Holder.adapter.addRemovedNumber(${removedNumber}) catch unreachable;\n`,
       );
     }
 
@@ -517,16 +466,25 @@ class ZigSourceFileGenerator {
       const variantName = toVariantName(variant.name.text);
       const doc = toZigStringLiteral(docToCommentText(variant.doc));
       if (variant.type) {
-        const rawType = this.typeSpeller.getZigType(variant.type);
-        const payloadType =
-          variant.isRecursive !== false ? `*const ${rawType}` : rawType;
-        const serializerExpr =
-          variant.isRecursive !== false
-            ? `skir_client.pointerSerializer(${rawType}, ${this.getSerializerExpr(variant.type, { maybeInitializingSameModule: true })})`
-            : this.getSerializerExpr(variant.type, {
-                maybeInitializingSameModule: true,
-              });
-        this.push(`Holder.adapter.addWrapperVariant(\n`);
+        const pk = this.enumVariantPointerKind(variant.type);
+        let payloadType: string;
+        let serializerExpr: string;
+        if (pk.kind === "pointer") {
+          const rawType = this.typeSpeller.getZigType(variant.type);
+          payloadType = `*const ${rawType}`;
+          serializerExpr = `skir_client.pointerSerializer(${rawType}, ${this.getSerializerExpr(variant.type, { maybeInitializingSameModule: true })})`;
+        } else if (pk.kind === "optional-pointer") {
+          const innerType = this.typeSpeller.getZigType(pk.innerType);
+          payloadType = `?*const ${innerType}`;
+          serializerExpr = `skir_client.optionalSerializer(skir_client.pointerSerializer(${innerType}, ${this.getSerializerExpr(pk.innerType, { maybeInitializingSameModule: true })}))`;
+        } else {
+          const rawType = this.typeSpeller.getZigType(variant.type);
+          payloadType = rawType;
+          serializerExpr = this.getSerializerExpr(variant.type, {
+            maybeInitializingSameModule: true,
+          });
+        }
+        this.push(`_Holder.adapter.addWrapperVariant(\n`);
         this.push(`${payloadType},\n`);
         this.push(`${toZigStringLiteral(variant.name.text)},\n`);
         this.push(`${variant.number},\n`);
@@ -547,15 +505,15 @@ class ZigSourceFileGenerator {
         this.push(`) catch unreachable;\n`);
       } else {
         this.push(
-          `Holder.adapter.addConstantVariant(${toZigStringLiteral(variant.name.text)}, ${variant.number}, ${kindOrdinal}, ${doc}, @as(S, .${variantName})) catch unreachable;\n`,
+          `_Holder.adapter.addConstantVariant(${toZigStringLiteral(variant.name.text)}, ${variant.number}, ${kindOrdinal}, ${doc}, @as(S, .${variantName})) catch unreachable;\n`,
         );
       }
       kindOrdinal += 1;
     }
 
-    this.push(`Holder.adapter.finalize() catch unreachable;\n`);
-    this.push(`Holder.state = 2;\n`);
-    this.push(`return &Holder.adapter;\n`);
+    this.push(`_Holder.adapter.finalize() catch unreachable;\n`);
+    this.push(`_Holder.state = 2;\n`);
+    this.push(`return &_Holder.adapter;\n`);
     this.push(`}\n`);
 
     this.push(`\n`);
@@ -578,6 +536,28 @@ class ZigSourceFileGenerator {
       `return skir_client._enumSerializerFromStatic(@This(), @This()._adapter);\n`,
     );
     this.push(`}\n`);
+  }
+
+  private getFieldSerializerExpr(field: Field): string {
+    switch (field.isRecursive) {
+      case "hard": {
+        const rawType = this.typeSpeller.getZigType(field.type!);
+        return `skir_client.recursiveSerializer(${rawType}, ${this.getSerializerExpr(field.type!, { maybeInitializingSameModule: true })})`;
+      }
+      case "via-optional": {
+        const innerResolvedType =
+          field.type!.kind === "optional" ? field.type!.other : field.type!;
+        const innerType = this.typeSpeller.getZigType(innerResolvedType);
+        const innerSerializer = this.getSerializerExpr(innerResolvedType, {
+          maybeInitializingSameModule: true,
+        });
+        return `skir_client.optionalSerializer(skir_client.pointerSerializer(${innerType}, ${innerSerializer}))`;
+      }
+      default:
+        return this.getSerializerExpr(field.type!, {
+          maybeInitializingSameModule: true,
+        });
+    }
   }
 
   private getSerializerExpr(
@@ -703,22 +683,22 @@ class ZigSourceFileGenerator {
 
     this.push(commentify(docToCommentText(constant.doc)));
     this.push(`pub fn ${zigName}() *const ${zigType} {\n`);
-    this.push(`const Holder = struct {\n`);
+    this.push(`const _Holder = struct {\n`);
     this.push(`var mutex: std.Thread.Mutex = .{};\n`);
     this.push(`var initialized: bool = false;\n`);
     this.push(`var value: ${zigType} = undefined;\n`);
     this.push(`};\n`);
-    this.push(`Holder.mutex.lock();\n`);
-    this.push(`defer Holder.mutex.unlock();\n`);
-    this.push(`if (!Holder.initialized) {\n`);
-    this.push(`Holder.value = ${serializerExpr}.deserialize(\n`);
+    this.push(`_Holder.mutex.lock();\n`);
+    this.push(`defer _Holder.mutex.unlock();\n`);
+    this.push(`if (!_Holder.initialized) {\n`);
+    this.push(`_Holder.value = ${serializerExpr}.deserialize(\n`);
     this.push(`std.heap.page_allocator,\n`);
     this.push(`${toZigStringLiteral(denseJson)},\n`);
     this.push(`.{ .keepUnrecognizedValues = false },\n`);
     this.push(`) catch unreachable;\n`);
-    this.push(`Holder.initialized = true;\n`);
+    this.push(`_Holder.initialized = true;\n`);
     this.push(`}\n`);
-    this.push(`return &Holder.value;\n`);
+    this.push(`return &_Holder.value;\n`);
     this.push(`}\n\n`);
   }
 
@@ -890,28 +870,47 @@ class ZigSourceFileGenerator {
     for (const field of record.record.fields) {
       if (!field.type) continue;
       const fieldEntry = value.entries[field.name.text];
-      if (field.isRecursive !== false) {
-        const storageName = this.getRecursiveStorageName(field);
-        if (fieldEntry) {
-          const innerType = this.typeSpeller.getZigType(field.type);
-          const innerExpr = this.valueToZigExpr(fieldEntry.value, field.type);
-          entries.push(
-            `.${storageName} = .{ .value = &@as(${innerType}, ${innerExpr}) }`,
-          );
-        } else {
-          entries.push(`.${storageName} = .default_value`);
-        }
-      } else {
-        const fieldName = toStructFieldName(field.name.text);
-        const fieldExpr = fieldEntry
-          ? this.valueToZigExpr(fieldEntry.value, field.type)
-          : this.typeSpeller.getDefaultExpr(field.type);
-        entries.push(`.${fieldName} = ${fieldExpr}`);
-      }
+      const fieldName = toStructFieldName(field.name.text);
+      entries.push(
+        `.${fieldName} = ${this.getStructFieldValueExpr(field, fieldEntry)}`,
+      );
     }
     entries.push(`._unrecognized = null`);
 
     return `.{\n${entries.join(",\n")}\n}`;
+  }
+
+  private getStructFieldValueExpr(
+    field: Field,
+    fieldEntry: ObjectEntry | undefined,
+  ): string {
+    switch (field.isRecursive) {
+      case "hard": {
+        if (fieldEntry) {
+          const innerType = this.typeSpeller.getZigType(field.type!);
+          const innerExpr = this.valueToZigExpr(fieldEntry.value, field.type!);
+          return `.{ .value = &@as(${innerType}, ${innerExpr}) }`;
+        }
+        return `.default_value`;
+      }
+      case "via-optional": {
+        const innerResolvedType =
+          field.type!.kind === "optional" ? field.type!.other : field.type!;
+        if (fieldEntry) {
+          const innerType = this.typeSpeller.getZigType(innerResolvedType);
+          const innerExpr = this.valueToZigExpr(
+            fieldEntry.value,
+            innerResolvedType,
+          );
+          return `&@as(${innerType}, ${innerExpr})`;
+        }
+        return `null`;
+      }
+      default:
+        return fieldEntry
+          ? this.valueToZigExpr(fieldEntry.value, field.type!)
+          : this.typeSpeller.getDefaultExpr(field.type!);
+    }
   }
 
   private enumValueToZigExpr(value: Value, record: RecordLocation): string {
@@ -923,6 +922,12 @@ class ZigSourceFileGenerator {
       }
       const zigVariant = toVariantName(declaration.name.text);
       if (declaration.type) {
+        const pk = this.enumVariantPointerKind(declaration.type);
+        if (pk.kind === "pointer") {
+          const innerType = this.typeSpeller.getZigType(declaration.type);
+          const innerExpr = this.typeSpeller.getDefaultExpr(declaration.type);
+          return `.{ .${zigVariant} = &@as(${innerType}, ${innerExpr}) }`;
+        }
         return `.{ .${zigVariant} = ${this.typeSpeller.getDefaultExpr(declaration.type)} }`;
       }
       return `.${zigVariant}`;
@@ -948,18 +953,39 @@ class ZigSourceFileGenerator {
     }
 
     const payloadEntry = value.entries["value"];
-    const payloadExpr = payloadEntry
-      ? this.valueToZigExpr(payloadEntry.value, declaration.type)
-      : this.typeSpeller.getDefaultExpr(declaration.type);
-    if (declaration.isRecursive !== false) {
+    const pk = this.enumVariantPointerKind(declaration.type);
+    if (pk.kind === "pointer") {
       const rawType = this.typeSpeller.getZigType(declaration.type);
+      const payloadExpr = payloadEntry
+        ? this.valueToZigExpr(payloadEntry.value, declaration.type)
+        : this.typeSpeller.getDefaultExpr(declaration.type);
       return `.{ .${zigVariant} = &@as(${rawType}, ${payloadExpr}) }`;
+    } else if (pk.kind === "optional-pointer") {
+      if (!payloadEntry) {
+        return `.{ .${zigVariant} = null }`;
+      }
+      const innerType = this.typeSpeller.getZigType(pk.innerType);
+      const innerExpr = this.valueToZigExpr(payloadEntry.value, pk.innerType);
+      return `.{ .${zigVariant} = &@as(${innerType}, ${innerExpr}) }`;
+    } else {
+      const payloadExpr = payloadEntry
+        ? this.valueToZigExpr(payloadEntry.value, declaration.type)
+        : this.typeSpeller.getDefaultExpr(declaration.type);
+      return `.{ .${zigVariant} = ${payloadExpr} }`;
     }
-    return `.{ .${zigVariant} = ${payloadExpr} }`;
   }
 
-  private getRecursiveStorageName(field: Field): string {
-    return `_${toStructFieldName(field.name.text)}`;
+  private enumVariantPointerKind(
+    type: ResolvedType,
+  ):
+    | { kind: "pointer"; innerType: ResolvedType }
+    | { kind: "optional-pointer"; innerType: ResolvedType }
+    | { kind: "none" } {
+    if (type.kind === "record") return { kind: "pointer", innerType: type };
+    if (type.kind === "optional" && type.other.kind === "record") {
+      return { kind: "optional-pointer", innerType: type.other };
+    }
+    return { kind: "none" };
   }
 
   private collectRecordImports(record: Record): void {
