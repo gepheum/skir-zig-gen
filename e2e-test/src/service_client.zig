@@ -30,46 +30,64 @@ pub fn RpcResult(comptime T: type) type {
     };
 }
 
-/// Sends RPCs to a SkirRPC service.
-pub const ServiceClient = struct {
+const ServiceClientImpl = struct {
     allocator: std.mem.Allocator,
     service_url: []const u8,
     headers: std.ArrayList(Header),
+};
+
+/// Sends RPCs to a SkirRPC service.
+pub const ServiceClient = opaque {
+    fn impl(self: *ServiceClient) *ServiceClientImpl {
+        return @ptrCast(@alignCast(self));
+    }
+
+    fn constImpl(self: *const ServiceClient) *const ServiceClientImpl {
+        return @ptrCast(@alignCast(self));
+    }
 
     /// Creates a client targeting `service_url`.
     ///
     /// The URL must not include a query string. Per-call data belongs in the
     /// request payload, not URL query parameters.
-    pub fn init(allocator: std.mem.Allocator, service_url: []const u8) !ServiceClient {
+    ///
+    /// The returned pointer must be released with `deinit`.
+    pub fn init(allocator: std.mem.Allocator, service_url: []const u8) !*ServiceClient {
         if (std.mem.indexOfScalar(u8, service_url, '?') != null) {
             return error.InvalidServiceUrl;
         }
-        return .{
+        const p = try allocator.create(ServiceClientImpl);
+        p.* = .{
             .allocator = allocator,
             .service_url = try allocator.dupe(u8, service_url),
             .headers = .empty,
         };
+        return @ptrCast(p);
     }
 
-    /// Releases client-owned allocations.
+    /// Releases all client-owned allocations, including the client itself.
     ///
     /// Call once when the client is no longer needed.
     pub fn deinit(self: *ServiceClient) void {
-        for (self.headers.items) |h| {
-            self.allocator.free(h.key);
-            self.allocator.free(h.value);
+        const i = self.impl();
+        const allocator = i.allocator;
+        for (i.headers.items) |h| {
+            allocator.free(h.key);
+            allocator.free(h.value);
         }
-        self.headers.deinit(self.allocator);
-        self.allocator.free(self.service_url);
+        i.headers.deinit(allocator);
+        allocator.free(i.service_url);
+        allocator.destroy(i);
     }
 
     /// Adds an HTTP header sent with every invocation.
     ///
     /// Can be chained while setting up the client.
     pub fn addHeader(self: *ServiceClient, key: []const u8, value: []const u8) !*ServiceClient {
-        try self.headers.append(self.allocator, .{
-            .key = try self.allocator.dupe(u8, key),
-            .value = try self.allocator.dupe(u8, value),
+        const i = self.impl();
+        try i.headers.append(i.allocator, .{
+            .key = try i.allocator.dupe(u8, key),
+            .value = try i.allocator.dupe(u8, value),
         });
         return self;
     }
@@ -87,7 +105,7 @@ pub const ServiceClient = struct {
     ///
     /// Example:
     /// ```zig
-    /// var client = try skir_client.ServiceClient.init(allocator, "http://127.0.0.1:18787/myapi");
+    /// const client = try skir_client.ServiceClient.init(allocator, "http://127.0.0.1:18787/myapi");
     /// defer client.deinit();
     ///
     /// _ = try client.addHeader("Authorization", "Bearer <token>");
@@ -106,34 +124,35 @@ pub const ServiceClient = struct {
         method: *const Method(Req, Resp),
         request: *const Req,
     ) !RpcResult(Resp) {
-        const request_json = method.request_serializer.serialize(self.allocator, request.*, .{ .format = .denseJson }) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(self.allocator, "failed to encode request: {s}", .{@errorName(err)}) } };
+        const i = self.constImpl();
+        const request_json = method.request_serializer.serialize(i.allocator, request.*, .{ .format = .denseJson }) catch |err| {
+            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(i.allocator, "failed to encode request: {s}", .{@errorName(err)}) } };
         };
-        defer self.allocator.free(request_json);
+        defer i.allocator.free(request_json);
 
-        const wire_body = try std.fmt.allocPrint(self.allocator, "{s}:{d}::{s}", .{ method.name, method.number, request_json });
-        defer self.allocator.free(wire_body);
+        const wire_body = try std.fmt.allocPrint(i.allocator, "{s}:{d}::{s}", .{ method.name, method.number, request_json });
+        defer i.allocator.free(wire_body);
 
-        const parsed = parseServiceUrl(self.service_url) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(self.allocator, "invalid service URL: {s}", .{@errorName(err)}) } };
+        const parsed = parseServiceUrl(i.service_url) catch |err| {
+            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(i.allocator, "invalid service URL: {s}", .{@errorName(err)}) } };
         };
 
-        const response = doHttpPost(self.allocator, parsed, wire_body, self.headers.items) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(self.allocator, "{s}", .{@errorName(err)}) } };
+        const response = doHttpPost(i.allocator, parsed, wire_body, i.headers.items) catch |err| {
+            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(i.allocator, "{s}", .{@errorName(err)}) } };
         };
-        defer self.allocator.free(response.content_type);
-        defer self.allocator.free(response.body);
+        defer i.allocator.free(response.content_type);
+        defer i.allocator.free(response.body);
 
         if (response.status_code < 200 or response.status_code >= 300) {
             const msg = if (std.mem.indexOf(u8, response.content_type, "text/plain") != null)
-                try self.allocator.dupe(u8, response.body)
+                try i.allocator.dupe(u8, response.body)
             else
-                try self.allocator.dupe(u8, "");
+                try i.allocator.dupe(u8, "");
             return RpcResult(Resp){ .err = .{ .status_code = response.status_code, .message = msg } };
         }
 
-        const value = method.response_serializer.deserialize(self.allocator, response.body, .{ .keepUnrecognizedValues = true }) catch |err| {
-            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(self.allocator, "failed to decode response: {s}", .{@errorName(err)}) } };
+        const value = method.response_serializer.deserialize(i.allocator, response.body, .{ .keepUnrecognizedValues = true }) catch |err| {
+            return RpcResult(Resp){ .err = .{ .status_code = 0, .message = try std.fmt.allocPrint(i.allocator, "failed to decode response: {s}", .{@errorName(err)}) } };
         };
 
         return RpcResult(Resp){ .ok = value };
