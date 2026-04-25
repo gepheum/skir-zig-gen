@@ -1,5 +1,15 @@
 const std = @import("std");
 
+/// A slice of `Spec.Value` items with lazy key-based lookup.
+///
+/// The key index is built on first lookup and cached for subsequent calls.
+///
+/// `Spec` must declare:
+/// - `Value`: the element type,
+/// - `Key`: the key type (must be hashable by `std.AutoHashMap`),
+/// - `fn getGet(Value) Key`: extracts the key from an element,
+/// - `fn defaultValue() *Value`: returns a pointer to a sentinel value used
+///   by `findByKeyOrDefault` when no match is found.
 pub fn KeyedArray(comptime Spec: type) type {
     const T = Spec.Value;
     const K = Spec.Key;
@@ -10,13 +20,18 @@ pub fn KeyedArray(comptime Spec: type) type {
         pub const Value = T;
         pub const Key = K;
 
-        // Exposed directly for callers that need full slice-level access.
+        /// Full slice of values. Callers may read this directly for
+        /// sequential access without paying the indexing cost.
         values: []T,
         allocator: std.mem.Allocator,
 
         key_index: ?std.AutoHashMap(K, *T) = null,
         mutex: std.Thread.Mutex = .{},
 
+        /// Creates a `KeyedArray` that wraps the given slice.
+        ///
+        /// Ownership of `values` remains with the caller; the `KeyedArray`
+        /// only borrows it.
         pub fn init(allocator: std.mem.Allocator, values: []T) Self {
             return .{
                 .values = values,
@@ -24,6 +39,7 @@ pub fn KeyedArray(comptime Spec: type) type {
             };
         }
 
+        /// Returns an empty `KeyedArray` with no elements.
         pub fn empty() Self {
             return .{
                 .values = @constCast(&[_]T{}),
@@ -31,6 +47,9 @@ pub fn KeyedArray(comptime Spec: type) type {
             };
         }
 
+        /// Frees the internal key index if it has been built.
+        ///
+        /// Does **not** free `values`; the caller retains that responsibility.
         pub fn deinit(self: *Self) void {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -54,6 +73,11 @@ pub fn KeyedArray(comptime Spec: type) type {
             self.key_index = map;
         }
 
+        /// Returns a pointer to the element whose key equals `key`, or `null`
+        /// if no such element exists.
+        ///
+        /// The key index is built on the first call and reused on subsequent
+        /// ones. Thread-safe.
         pub fn findByKey(self: *Self, key: K) !?*T {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -62,6 +86,8 @@ pub fn KeyedArray(comptime Spec: type) type {
             return self.key_index.?.get(key);
         }
 
+        /// Returns a pointer to the element whose key equals `key`, or the
+        /// sentinel value from `Spec.defaultValue()` if no match is found.
         pub fn findByKeyOrDefault(self: *Self, key: K) !*T {
             if (try self.findByKey(key)) |value| return value;
             return Spec.defaultValue();
