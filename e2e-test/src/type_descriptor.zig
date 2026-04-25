@@ -181,10 +181,6 @@ pub const TypeDescriptor = union(enum) {
     enum_record: EnumDescriptor,
 };
 
-/// Mutable map used while recursively constructing descriptors.
-/// Keys are fully-qualified record IDs (`qualified_name`).
-pub const TypeDescriptorMap = std.StringHashMap(*TypeDescriptor);
-
 // =============================================================================
 // TypeDescriptor JSON serialisation
 // =============================================================================

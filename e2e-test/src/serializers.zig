@@ -24,7 +24,6 @@ const EnumVariant = type_descriptor.EnumVariant;
 const StructDescriptor = type_descriptor.StructDescriptor;
 const EnumDescriptor = type_descriptor.EnumDescriptor;
 const TypeDescriptor = type_descriptor.TypeDescriptor;
-const TypeDescriptorMap = type_descriptor.TypeDescriptorMap;
 const readU8 = decode_utils.readU8;
 const readU16Le = decode_utils.readU16Le;
 const readU32Le = decode_utils.readU32Le;
@@ -80,9 +79,9 @@ const BoolAdapter = struct {
         return b != 0;
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .Bool };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -154,9 +153,9 @@ const Int32Adapter = struct {
         };
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .Int32 };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -212,9 +211,9 @@ const Int64Adapter = struct {
         return decodeNumber(input);
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .Int64 };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -274,9 +273,9 @@ const Hash64Adapter = struct {
         return @bitCast(try decodeNumber(input));
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .Hash64 };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -422,9 +421,9 @@ const TimestampAdapter = struct {
         return Timestamp{ .unix_millis = ms };
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .Timestamp };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -494,9 +493,9 @@ const Float32Adapter = struct {
         }
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .Float32 };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -555,9 +554,9 @@ const Float64Adapter = struct {
         }
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .Float64 };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -643,9 +642,9 @@ const StringAdapter = struct {
         return utf8LossyDupe(raw, allocator);
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .String };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -838,9 +837,9 @@ const BytesAdapter = struct {
         return bytes;
     }
 
-    pub fn typeDescriptor(_: Self, _: std.mem.Allocator, _: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+    pub fn typeDescriptor(_: Self) *const TypeDescriptor {
         const static: TypeDescriptor = .{ .primitive = .Bytes };
-        return @constCast(&static);
+        return &static;
     }
 };
 
@@ -885,11 +884,16 @@ pub fn optionalSerializer(comptime inner: anytype) Serializer(?@TypeOf(inner).Va
             }
             return try ivt.decodeFn(alloc, input, keep);
         }
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
-            const inner_ptr = try ivt.typeDescriptorFn(allocator, descriptors);
-            const result = try allocator.create(TypeDescriptor);
-            result.* = TypeDescriptor{ .optional = inner_ptr };
-            return result;
+        pub fn typeDescriptor(_: @This()) *const TypeDescriptor {
+            const S = struct {
+                var desc: TypeDescriptor = undefined;
+                fn initOnce() void {
+                    desc = .{ .optional = ivt.typeDescriptorFn() };
+                }
+                var once = std.once(initOnce);
+            };
+            S.once.call();
+            return &S.desc;
         }
     };
 
@@ -942,8 +946,8 @@ pub fn recursiveSerializer(comptime T: type, comptime inner: Serializer(T)) Seri
             return .{ .value = p };
         }
 
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
-            return ivt.typeDescriptorFn(allocator, descriptors);
+        pub fn typeDescriptor(_: @This()) *const TypeDescriptor {
+            return ivt.typeDescriptorFn();
         }
     };
 
@@ -983,8 +987,8 @@ pub fn pointerSerializer(comptime T: type, comptime inner: Serializer(T)) Serial
             return p;
         }
 
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
-            return ivt.typeDescriptorFn(allocator, descriptors);
+        pub fn typeDescriptor(_: @This()) *const TypeDescriptor {
+            return ivt.typeDescriptorFn();
         }
     };
 
@@ -1063,11 +1067,16 @@ pub fn arraySerializer(comptime inner: anytype) Serializer([]const @TypeOf(inner
             for (0..n) |i| items[i] = try ivt.decodeFn(alloc, input, keep);
             return items;
         }
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
-            const item_ptr = try ivt.typeDescriptorFn(allocator, descriptors);
-            const result = try allocator.create(TypeDescriptor);
-            result.* = TypeDescriptor{ .array = .{ .item_type = item_ptr, .key_extractor = "" } };
-            return result;
+        pub fn typeDescriptor(_: @This()) *const TypeDescriptor {
+            const S = struct {
+                var desc: TypeDescriptor = undefined;
+                fn initOnce() void {
+                    desc = .{ .array = .{ .item_type = ivt.typeDescriptorFn(), .key_extractor = "" } };
+                }
+                var once = std.once(initOnce);
+            };
+            S.once.call();
+            return &S.desc;
         }
     };
 
@@ -1149,7 +1158,7 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
             return KArr.init(alloc, items);
         }
 
-        pub fn typeDescriptor(_: @This(), allocator: std.mem.Allocator, descriptors: *TypeDescriptorMap) anyerror!*TypeDescriptor {
+        pub fn typeDescriptor(_: @This()) *const TypeDescriptor {
             const key_extractor_name = comptime blk: {
                 if (@hasDecl(Spec, "keyExtractor")) {
                     const decl_ty = @TypeOf(Spec.keyExtractor);
@@ -1158,10 +1167,15 @@ pub fn keyedArraySerializer(comptime Spec: type, comptime inner: Serializer(Spec
                 }
                 break :blk "";
             };
-            const item_ptr = try ivt.typeDescriptorFn(allocator, descriptors);
-            const result = try allocator.create(TypeDescriptor);
-            result.* = TypeDescriptor{ .array = .{ .item_type = item_ptr, .key_extractor = key_extractor_name } };
-            return result;
+            const S = struct {
+                var desc: TypeDescriptor = undefined;
+                fn initOnce() void {
+                    desc = .{ .array = .{ .item_type = ivt.typeDescriptorFn(), .key_extractor = key_extractor_name } };
+                }
+                var once = std.once(initOnce);
+            };
+            S.once.call();
+            return &S.desc;
         }
     };
 
@@ -1284,7 +1298,7 @@ test "boolSerializer: binary encoding false is skir then 0x00" {
 }
 
 test "boolSerializer: typeDescriptor is primitive bool" {
-    const td = try boolSerializer().typeDescriptor(std.testing.allocator);
+    const td = boolSerializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Bool, td.primitive);
 }
@@ -1418,7 +1432,7 @@ test "int32Serializer: binary round-trip" {
 }
 
 test "int32Serializer: typeDescriptor is primitive int32" {
-    const td = try int32Serializer().typeDescriptor(std.testing.allocator);
+    const td = int32Serializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Int32, td.primitive);
 }
@@ -1503,7 +1517,7 @@ test "int64Serializer: binary round-trip" {
 }
 
 test "int64Serializer: typeDescriptor is primitive int64" {
-    const td = try int64Serializer().typeDescriptor(std.testing.allocator);
+    const td = int64Serializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Int64, td.primitive);
 }
@@ -1606,7 +1620,7 @@ test "hash64Serializer: binary round-trip" {
 }
 
 test "hash64Serializer: typeDescriptor is primitive hash64" {
-    const td = try hash64Serializer().typeDescriptor(std.testing.allocator);
+    const td = hash64Serializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Hash64, td.primitive);
 }
@@ -1713,7 +1727,7 @@ test "timestampSerializer: binary round-trip" {
 }
 
 test "timestampSerializer: typeDescriptor is primitive timestamp" {
-    const td = try timestampSerializer().typeDescriptor(std.testing.allocator);
+    const td = timestampSerializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Timestamp, td.primitive);
 }
@@ -1789,7 +1803,7 @@ test "optionalSerializer: binary round-trip" {
 }
 
 test "optionalSerializer: typeDescriptor is optional of int32" {
-    const td = try optionalSerializer(int32Serializer()).typeDescriptor(std.heap.page_allocator);
+    const td = optionalSerializer(int32Serializer()).typeDescriptor();
     try std.testing.expect(td == .optional);
     try std.testing.expectEqual(PrimitiveType.Int32, td.optional.primitive);
 }
@@ -1872,7 +1886,7 @@ test "arraySerializer: binary round-trip" {
 }
 
 test "arraySerializer: typeDescriptor is array of int32" {
-    const td = try arraySerializer(int32Serializer()).typeDescriptor(std.heap.page_allocator);
+    const td = arraySerializer(int32Serializer()).typeDescriptor();
     try std.testing.expect(td == .array);
     try std.testing.expectEqual(PrimitiveType.Int32, td.array.item_type.primitive);
 }
@@ -1942,7 +1956,7 @@ test "keyedArraySerializer: binary round-trip" {
 }
 
 test "keyedArraySerializer: typeDescriptor includes key extractor" {
-    const td = try keyedArraySerializer(TestIntKeyedSpec, int32Serializer()).typeDescriptor(std.heap.page_allocator);
+    const td = keyedArraySerializer(TestIntKeyedSpec, int32Serializer()).typeDescriptor();
     try std.testing.expect(td == .array);
     try std.testing.expectEqual(PrimitiveType.Int32, td.array.item_type.primitive);
     try std.testing.expectEqualStrings("self", td.array.key_extractor);
@@ -2030,7 +2044,7 @@ test "bytesSerializer: binary round-trip" {
 }
 
 test "bytesSerializer: typeDescriptor is primitive bytes" {
-    const td = try bytesSerializer().typeDescriptor(std.testing.allocator);
+    const td = bytesSerializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Bytes, td.primitive);
 }
@@ -2124,7 +2138,7 @@ test "float32Serializer: binary round-trip" {
 }
 
 test "float32Serializer: typeDescriptor is primitive float32" {
-    const td = try float32Serializer().typeDescriptor(std.testing.allocator);
+    const td = float32Serializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Float32, td.primitive);
 }
@@ -2218,7 +2232,7 @@ test "float64Serializer: binary round-trip" {
 }
 
 test "float64Serializer: typeDescriptor is primitive float64" {
-    const td = try float64Serializer().typeDescriptor(std.testing.allocator);
+    const td = float64Serializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.Float64, td.primitive);
 }
@@ -2323,7 +2337,7 @@ test "stringSerializer: decode invalid utf8 replaced with U+FFFD" {
 }
 
 test "stringSerializer: typeDescriptor is primitive string" {
-    const td = try stringSerializer().typeDescriptor(std.testing.allocator);
+    const td = stringSerializer().typeDescriptor();
     try std.testing.expect(td == .primitive);
     try std.testing.expectEqual(PrimitiveType.String, td.primitive);
 }

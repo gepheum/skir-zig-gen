@@ -313,9 +313,9 @@ pub fn Service(comptime Meta: type) type {
                 return error.DuplicateMethodNumber;
             }
 
-            const req_td = try method.request_serializer.typeDescriptor(self.allocator);
+            const req_td = method.request_serializer.typeDescriptor();
             const req_td_json = try type_descriptor.typeDescriptorToJson(self.allocator, req_td);
-            const resp_td = try method.response_serializer.typeDescriptor(self.allocator);
+            const resp_td = method.response_serializer.typeDescriptor();
             const resp_td_json = try type_descriptor.typeDescriptorToJson(self.allocator, resp_td);
 
             const entry: Entry = .{
