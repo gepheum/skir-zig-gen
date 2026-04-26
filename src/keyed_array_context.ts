@@ -85,7 +85,7 @@ export class KeyedArrayContext {
         ? ""
         : `${modulePathToImportAlias(struct.modulePath)}.`;
     return [...keyMap.values()].map((fieldPath) => {
-      const specName = `${localTypeName}${getZigKeySpecSuffix(fieldPath)}KeySpec`;
+      const specName = `${localTypeName}${getZigKeySpecSuffix(fieldPath)}`;
       let zigKeyExpr = "item.".concat(
         fieldPath.path
           .map((part) =>
@@ -102,7 +102,7 @@ export class KeyedArrayContext {
       return {
         specName,
         specRef: `${importPrefix}${parentPath ? `${parentPath}.` : ""}${specName}`,
-        valueType: localTypeName,
+        valueType: fullTypeName,
         zigKeyType: typeSpeller.getKeyType(fieldPath.keyType),
         zigKeyExpr,
         keyExtractor: fieldPath.path.map((part) => part.name.text).join("."),
@@ -150,9 +150,10 @@ export function keyTypeIsSupported(
 }
 
 export function getZigKeySpecSuffix(fieldPath: FieldPath): string {
-  return "By".concat(
+  return "_By".concat(
     fieldPath.path
       .map((part) => convertCase(part.name.text, "UpperCamel"))
-      .join(""),
+      .join("_"),
+    "_KeySpec",
   );
 }

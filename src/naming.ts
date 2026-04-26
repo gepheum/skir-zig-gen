@@ -8,10 +8,11 @@ export function modulePathToOutputPath(modulePath: string): string {
 }
 
 export function modulePathToImportAlias(modulePath: string): string {
-  const alias = modulePathToOutputPath(modulePath)
-    .replace(/\.zig$/, "")
-    .replace(/[^A-Za-z0-9_]/g, "_");
-  return RESERVED_LOWER_NAMES.has(alias) ? `${alias}_module` : alias;
+  const outputPath = modulePathToOutputPath(modulePath).replace(/\.zig$/, "");
+  const components = outputPath
+    .split("/")
+    .map((c) => c.replace(/[^A-Za-z0-9]/g, "_"));
+  return `_x_${components.join("__")}`;
 }
 
 export function getTypeName(record: RecordLocation): string {
@@ -158,8 +159,6 @@ const RESERVED_LOWER_NAMES = new Set<string>([
   "var",
   "volatile",
   "while",
-  "skir_client",
-  "std",
 ]);
 
 const RESERVED_TYPE_NAMES = new Set<string>([

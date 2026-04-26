@@ -32,7 +32,7 @@ export class TypeSpeller {
         const recordLocation = this.recordMap.get(type.key)!;
         const typeName = getTypeName(recordLocation);
         if (recordLocation.modulePath === this.modulePath) {
-          return typeName;
+          return `_this_file.${typeName}`;
         } else {
           const importAlias = modulePathToImportAlias(
             recordLocation.modulePath,
@@ -47,7 +47,7 @@ export class TypeSpeller {
             ? this.keyedArrayContext.getKeySpecForArrayType(type, this)?.specRef
             : undefined);
         if (keyedSpecName) {
-          return `skir_client.KeyedArray(${keyedSpecName})`;
+          return `_skir_client.KeyedArray(${keyedSpecName})`;
         } else {
           return `[]const ${this.getZigType(type.item)}`;
         }
@@ -77,7 +77,7 @@ export class TypeSpeller {
             ? this.keyedArrayContext.getKeySpecForArrayType(type, this)?.specRef
             : undefined);
         if (keyedSpecName) {
-          return `skir_client.KeyedArray(${keyedSpecName}).empty()`;
+          return `_skir_client.KeyedArray(${keyedSpecName}).empty()`;
         }
         return "&.{}";
       }
@@ -91,7 +91,7 @@ export class TypeSpeller {
   getZigFieldType(field: Field): string {
     switch (field.isRecursive) {
       case "hard":
-        return `skir_client.Recursive(${this.getZigType(field.type!)})`;
+        return `_skir_client.Recursive(${this.getZigType(field.type!)})`;
       case "via-optional": {
         // field.type is ?T; we want ?*const T (not ?*const ?T)
         const innerType =
@@ -114,7 +114,7 @@ export class TypeSpeller {
     const recordLocation = this.recordMap.get(recordKey)!;
     const typeName = getTypeName(recordLocation);
     if (recordLocation.modulePath === this.modulePath) {
-      return typeName;
+      return `_this_file.${typeName}`;
     }
     return `${modulePathToImportAlias(recordLocation.modulePath)}.${typeName}`;
   }
@@ -158,7 +158,7 @@ function primitiveToZigType(primitive: Primitive): string {
     case "float64":
       return "f64";
     case "timestamp":
-      return "skir_client.Timestamp";
+      return "_skir_client.Timestamp";
     case "string":
     case "bytes":
       return "[]const u8";

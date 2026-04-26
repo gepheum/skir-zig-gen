@@ -125,6 +125,7 @@ struct Name {
   struct Name {
     struct Name {
       name2: Name2;
+      name3: .Name;
     }
   }
   mutable_name: Name1;
@@ -147,4 +148,8 @@ struct True {
 }
 
 struct Holder {}
-struct This {}
+struct This {
+  std: bool;
+}
+
+struct ItemByBoolKeySpec {}
