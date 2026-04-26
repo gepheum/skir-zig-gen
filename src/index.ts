@@ -126,8 +126,9 @@ class ZigSourceFileGenerator {
 // Home: https://github.com/gepheum/skir-zig-gen
 //
 // To install the Skir client library, run:
-//   zig fetch --save https://github.com/gepheum/skir-zig-client/archive/refs/heads/main.tar.gz
-
+//   zig fetch --save https://github.com/gepheum/skir-zig-client/archive/refs/tags/\${latest_tag}.tar.gz
+// Grab the latest tag from:
+//   https://github.com/gepheum/skir-zig-client/releases
 `,
     );
 
