@@ -129,7 +129,7 @@ class ZigSourceFileGenerator {
 //   zig fetch --save https://github.com/gepheum/skir-zig-client/archive/refs/tags/\${latest_tag}.tar.gz
 // Grab the latest tag from:
 //   https://github.com/gepheum/skir-zig-client/releases
-`,
+\n`,
     );
 
     this.writeImports();
