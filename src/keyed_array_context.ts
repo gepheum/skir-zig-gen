@@ -9,7 +9,6 @@ import {
   type ResolvedType,
 } from "skir-internal";
 import {
-  getDeclaredTypeName,
   getTypeName,
   modulePathToImportAlias,
   toStructFieldName,
@@ -74,18 +73,13 @@ export class KeyedArrayContext {
       return [];
     }
 
-    const localTypeName = getDeclaredTypeName(struct);
     const fullTypeName = getTypeName(struct);
-    const parentPath =
-      fullTypeName === localTypeName
-        ? ""
-        : fullTypeName.slice(0, -(localTypeName.length + 1));
-    const importPrefix =
+    const typeRef =
       struct.modulePath === typeSpeller.modulePath
-        ? ""
-        : `${modulePathToImportAlias(struct.modulePath)}.`;
+        ? `_this_file.${fullTypeName}`
+        : `${modulePathToImportAlias(struct.modulePath)}.${fullTypeName}`;
     return [...keyMap.values()].map((fieldPath) => {
-      const specName = `${localTypeName}${getZigKeySpecSuffix(fieldPath)}`;
+      const specName = getZigKeySpecSuffix(fieldPath);
       let zigKeyExpr = "item.".concat(
         fieldPath.path
           .map((part) =>
@@ -101,8 +95,8 @@ export class KeyedArrayContext {
 
       return {
         specName,
-        specRef: `${importPrefix}${parentPath ? `${parentPath}.` : ""}${specName}`,
-        valueType: fullTypeName,
+        specRef: `${typeRef}.${specName}`,
+        valueType: typeRef,
         zigKeyType: typeSpeller.getKeyType(fieldPath.keyType),
         zigKeyExpr,
         keyExtractor: fieldPath.path.map((part) => part.name.text).join("."),
@@ -150,10 +144,9 @@ export function keyTypeIsSupported(
 }
 
 export function getZigKeySpecSuffix(fieldPath: FieldPath): string {
-  return "_By".concat(
+  return "By_".concat(
     fieldPath.path
       .map((part) => convertCase(part.name.text, "UpperCamel"))
       .join("_"),
-    "_KeySpec",
   );
 }
