@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.15.0",
     .dependencies = .{
         .skir_client = .{
-            .url = "https://github.com/gepheum/skir-zig-client/archive/refs/tags/v0.1.1.tar.gz",
-            .hash = "skir_client-0.1.0-Bu7WIH4UBAAoLIDUowbhx59IG4N8CJbYOj9Iwy1HpzFc",
+            .url = "https://github.com/gepheum/skir-zig-client/archive/refs/tags/v0.1.2.tar.gz",
+            .hash = "skir_client-0.1.0-Bu7WIOVABACiQA25zTzGAja0u_skTgMSMJaBPlRV8JL4",
         },
     },
     .paths = .{

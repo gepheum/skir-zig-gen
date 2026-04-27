@@ -71,6 +71,17 @@ test "enums obtain variant and kind" {
     try std.testing.expect(weekday.kind() == .Sunday);
 }
 
+test "generated types support clone" {
+    const point = structs.Point{ .x = 12, .y = 34 };
+    const cloned_point = try point.clone(std.testing.allocator);
+    try std.testing.expectEqual(@as(i32, 12), cloned_point.x);
+    try std.testing.expectEqual(@as(i32, 34), cloned_point.y);
+
+    const weekday: skirout_enums.Weekday = .Sunday;
+    const cloned_weekday = try weekday.clone(std.testing.allocator);
+    try std.testing.expect(cloned_weekday.kind() == .Sunday);
+}
+
 test "constants access values" {
     try std.testing.expectEqual(@as(i64, 9223372036854775807), skirout_constants.large_int64_const);
     try std.testing.expectEqual(@as(i64, 1703984028000), skirout_constants.one_timestamp_const.unix_millis);

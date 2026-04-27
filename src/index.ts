@@ -318,6 +318,14 @@ class ZigSourceFileGenerator {
   private writeStructSerializer(loc: RecordLocation, _typeName: string): void {
     const qualifiedName = loc.recordAncestors.map((x) => x.name.text).join(".");
 
+    this.push(
+      `pub fn clone(self: @This(), allocator: _std.mem.Allocator) !@This() {\n`,
+    );
+    this.push(`return try @This().serializer().clone(allocator, self);\n`);
+    this.push(`}\n`);
+
+    this.push(`\n`);
+
     this.push(`pub fn serializer() _skir_client.Serializer(@This()) {\n`);
     this.push(
       `if (@inComptime()) return @This()._maybeInitializingSerializer();\n`,
@@ -404,6 +412,14 @@ class ZigSourceFileGenerator {
 
   private writeEnumSerializer(loc: RecordLocation, _typeName: string): void {
     const qualifiedName = loc.recordAncestors.map((x) => x.name.text).join(".");
+
+    this.push(
+      `pub fn clone(self: @This(), allocator: _std.mem.Allocator) !@This() {\n`,
+    );
+    this.push(`return try @This().serializer().clone(allocator, self);\n`);
+    this.push(`}\n`);
+
+    this.push(`\n`);
 
     this.push(`pub fn serializer() _skir_client.Serializer(@This()) {\n`);
     this.push(

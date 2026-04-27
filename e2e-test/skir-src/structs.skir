@@ -146,6 +146,8 @@ struct True {
   field: bool;
   by: bool;
   it: [Floats|x];
+  serializer: bool;
+  clone: bool;
 }
 
 struct Holder {}

@@ -40,12 +40,18 @@ export function toTypeName(input: string): string {
 export function toStructFieldName(input: string): string {
   const name = convertCase(input, "lower_underscore");
   if (name === "_unrecognized") {
-    return "_unrecognized_field";
+    return "_unrecognized_";
   }
-  if (name === "default" || name === "serializer") {
+  if (
+    name === "default" ||
+    name === "serializer" ||
+    name === "clone" ||
+    RESERVED_LOWER_NAMES.has(name)
+  ) {
     return `${name}_`;
+  } else {
+    return name;
   }
-  return RESERVED_LOWER_NAMES.has(name) ? `${name}_field` : name;
 }
 
 export function toFieldGetterName(field: Field | string): string {
