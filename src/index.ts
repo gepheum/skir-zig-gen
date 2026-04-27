@@ -636,9 +636,7 @@ class ZigSourceFileGenerator {
     this.push(`pub fn getGet(item: Value) Key {\n`);
     this.push(`return ${keySpec.zigKeyExpr};\n`);
     this.push(`}\n`);
-    this.push(
-      `pub const default_value: *Value = @constCast(&Value.default);\n`,
-    );
+    this.push(`pub const default_value: Value = Value.default;\n`);
     this.push(
       `pub const key_extractor: []const u8 = ${toZigStringLiteral(keySpec.keyExtractor)};\n`,
     );

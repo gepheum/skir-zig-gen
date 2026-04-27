@@ -39,6 +39,7 @@ struct Item {
   weekday: Weekday;
   bytes: bytes;
   timestamp: timestamp;
+  default: bool;
 }
 
 struct Items {
