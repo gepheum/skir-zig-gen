@@ -83,9 +83,12 @@ std.debug.print("{d}\n", .{jane.user_id}); // 0
 #### Creating modified copies
 
 ```zig
-// Zig structs have value semantics: assigning a struct copies it.
-// Modify the copy's fields to produce a derived value.
-var evil_john = john;
+// For a shallow copy, use a plain assignment.
+var evil_jane = jane;
+evil_jane.name = "Evil Jane";
+
+// For a deep copy, use clone().
+var evil_john = try john.clone(allocator);
 evil_john.name = "Evil John";
 evil_john.quote = "I solemnly swear I am up to no good.";
 
@@ -185,14 +188,33 @@ std.debug.print("{s}\n", .{john_readable_json});
 // performance matters, though the difference is rarely significant).
 const john_binary = try user_serializer.serialize(allocator, john, .{ .format = .binary });
 defer allocator.free(john_binary);
+
+// deserialize() auto-detects the format (dense JSON, readable JSON, or
+// binary) from the input bytes - the same call works for all three.
+// Pass an arena allocator; the whole deserialized object graph is freed at
+// once by calling arena.deinit().
+var deserialize_arena = std.heap.ArenaAllocator.init(allocator);
+defer deserialize_arena.deinit();
+
+const from_dense = try user_serializer.deserialize(deserialize_arena.allocator(), john_dense_json, .{});
+std.debug.print("{s}\n", .{from_dense.name}); // John Doe
+
+const from_readable = try user_serializer.deserialize(deserialize_arena.allocator(), john_readable_json, .{});
+std.debug.print("{s}\n", .{from_readable.name}); // John Doe
+
+const from_binary = try user_serializer.deserialize(deserialize_arena.allocator(), john_binary, .{});
+std.debug.print("{s}\n", .{from_binary.name}); // John Doe
 ```
 
 ### Deserialization
 
 ```zig
-// Use .deserialize() to deserialize from JSON (both dense and readable
-// formats are accepted) or binary.
-const reserialized_john = try user_serializer.deserialize(allocator, john_dense_json, .{});
+// Use .deserialize() with an arena allocator when loading larger values,
+// then free everything in one shot with arena.deinit().
+var arena = std.heap.ArenaAllocator.init(allocator);
+defer arena.deinit();
+
+const reserialized_john = try user_serializer.deserialize(arena.allocator(), john_dense_json, .{});
 std.debug.print("{s}\n", .{reserialized_john.name}); // John Doe
 ```
 
