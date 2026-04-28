@@ -197,9 +197,11 @@ const john_binary = try user_serializer.serialize(
     john,
     .{ .format = .binary },
 );
+```
 
 ### Deserialization
 
+```zig
 // deserialize() auto-detects the format (dense JSON, readable JSON, or
 // binary) from the input bytes — the same call works for all three.
 // Pass an arena allocator; everything allocated through it is freed at
