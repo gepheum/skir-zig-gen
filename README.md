@@ -60,7 +60,7 @@ All fields are value types; the struct is not heap-allocated by the
 generator.
 
 ```zig
-// Construct a User by providing all fields.
+// Skir generates a plain Zig struct for each struct in the .skir schema.
 const john: user_mod.User = .{
     .user_id = 42,
     .name = "John Doe",
@@ -72,19 +72,25 @@ const john: user_mod.User = .{
         ._unrecognized = null,
     }},
     .subscription_status = .Free,
-    ._unrecognized = null,
+    ._unrecognized = null, // Present in every struct; always set to null
 };
 
-std.debug.print("{s}\n", .{john.name}); // John Doe
+std.debug.print("{s}\n", .{john.name});
+// John Doe
 ```
 
 #### Default value
 
 ```zig
-// User.default is an instance with all fields set to their zero values.
-const jane = user_mod.User.default;
-std.debug.print("{s}\n", .{jane.name}); // (empty string)
-std.debug.print("{d}\n", .{jane.user_id}); // 0
+// To create a value with only some fields set, start from the default
+// and override what you need. All other fields keep their default values.
+var jane = user_mod.User.default;
+jane.name = "Jane";
+jane.quote = "I came, I saw, I deleted the cache.";
+std.debug.print("{s}\n", .{jane.name});
+// Jane
+std.debug.print("{d}\n", .{jane.user_id});
+// 0
 ```
 
 #### Creating modified copies
@@ -95,12 +101,14 @@ var evil_jane = jane;
 evil_jane.name = "Evil Jane";
 
 // For a deep copy, use clone().
-var evil_john = try john.clone(allocator);
+var evil_john = try john.clone(arena_allocator);
 evil_john.name = "Evil John";
 evil_john.quote = "I solemnly swear I am up to no good.";
 
-std.debug.print("{s}\n", .{evil_john.name}); // Evil John
-std.debug.print("{d}\n", .{evil_john.user_id}); // 42
+std.debug.print("{s}\n", .{evil_john.name});
+// Evil John
+std.debug.print("{d}\n", .{evil_john.user_id});
+// 42
 ```
 
 ### Enum types
@@ -125,14 +133,12 @@ const trial_payload: user_mod.SubscriptionStatus.Trial_ = .{
 };
 
 const some_statuses = [_]user_mod.SubscriptionStatus{
-    // The .Unknown variant is present in all Skir enums even if it is not
-    // declared in the .skir file.
     user_mod.SubscriptionStatus.unknown,
     .Free,
     .Premium,
-    // Wrapper variants carry a value.
     .{ .Trial = &trial_payload },
 };
+_ = some_statuses;
 ```
 
 ### Enum matching
@@ -150,7 +156,8 @@ fn subscriptionInfoText(status: user_mod.SubscriptionStatus) []const u8 {
     };
 }
 
-std.debug.print("{s}\n", .{subscriptionInfoText(john.subscription_status)}); // Free user
+std.debug.print("{s}\n", .{subscriptionInfoText(john.subscription_status)});
+// Free user
 std.debug.print("{s}\n", .{subscriptionInfoText(user_mod.SubscriptionStatus.unknown)});
 // Unknown subscription status
 std.debug.print("{s}\n", .{subscriptionInfoText(.{ .Trial = &trial_payload })});
@@ -165,65 +172,65 @@ deserialize instances of `User`.
 ```zig
 const user_serializer = user_mod.User.serializer();
 
-// Serialize to dense JSON (field-number-based; the default mode).
-// Use this when you plan to deserialize the value later. Because field
-// names are not included, renaming a field remains backward-compatible.
-const john_dense_json = try user_serializer.serialize(allocator, john, .{ .format = .denseJson });
-defer allocator.free(john_dense_json);
+const john_dense_json = try user_serializer.serialize(
+    arena_allocator,
+    john,
+    .{ .format = .denseJson },
+);
 std.debug.print("{s}\n", .{john_dense_json});
-// [42,"John Doe",...]
+// [42,"John Doe","Coffee is just a socially acceptable form of rage.",[["Dumbo",1,"🐘"]],1]
 
-// Serialize to readable (name-based, indented) JSON.
-// Use this mainly for debugging.
-const john_readable_json = try user_serializer.serialize(allocator, john, .{ .format = .readableJson });
-defer allocator.free(john_readable_json);
+const john_readable_json = try user_serializer.serialize(
+    arena_allocator,
+    john,
+    .{ .format = .readableJson },
+);
 std.debug.print("{s}\n", .{john_readable_json});
 // {
 //   "user_id": 42,
 //   "name": "John Doe",
-//   "quote": "Coffee is just a socially acceptable form of rage.",
-//   "pets": [
-//     {
-//       "name": "Dumbo",
-//       "height_in_meters": 1.0,
-//       "picture": "🐘"
-//     }
-//   ],
-//   "subscription_status": "FREE"
+//   ...
 // }
 
-// Serialize to binary format (more compact than JSON; useful when
-// performance matters, though the difference is rarely significant).
-const john_binary = try user_serializer.serialize(allocator, john, .{ .format = .binary });
-defer allocator.free(john_binary);
-
-// deserialize() auto-detects the format (dense JSON, readable JSON, or
-// binary) from the input bytes - the same call works for all three.
-// Pass an arena allocator; the whole deserialized object graph is freed at
-// once by calling arena.deinit().
-var deserialize_arena = std.heap.ArenaAllocator.init(allocator);
-defer deserialize_arena.deinit();
-
-const from_dense = try user_serializer.deserialize(deserialize_arena.allocator(), john_dense_json, .{});
-std.debug.print("{s}\n", .{from_dense.name}); // John Doe
-
-const from_readable = try user_serializer.deserialize(deserialize_arena.allocator(), john_readable_json, .{});
-std.debug.print("{s}\n", .{from_readable.name}); // John Doe
-
-const from_binary = try user_serializer.deserialize(deserialize_arena.allocator(), john_binary, .{});
-std.debug.print("{s}\n", .{from_binary.name}); // John Doe
-```
+const john_binary = try user_serializer.serialize(
+    arena_allocator,
+    john,
+    .{ .format = .binary },
+);
 
 ### Deserialization
 
-```zig
-// Use .deserialize() with an arena allocator when loading larger values,
-// then free everything in one shot with arena.deinit().
-var arena = std.heap.ArenaAllocator.init(allocator);
-defer arena.deinit();
+// deserialize() auto-detects the format (dense JSON, readable JSON, or
+// binary) from the input bytes — the same call works for all three.
+// Pass an arena allocator; everything allocated through it is freed at
+// once by calling arena.deinit().
 
-const reserialized_john = try user_serializer.deserialize(arena.allocator(), john_dense_json, .{});
-std.debug.print("{s}\n", .{reserialized_john.name}); // John Doe
+// Deserialize from dense JSON.
+const from_dense = try user_serializer.deserialize(
+    arena_allocator,
+    john_dense_json,
+    .{},
+);
+std.debug.print("{s}\n", .{from_dense.name});
+// John Doe
+
+// Deserialize from readable JSON — same call, different bytes.
+const from_readable = try user_serializer.deserialize(
+    arena_allocator,
+    john_readable_json,
+    .{},
+);
+std.debug.print("{s}\n", .{from_readable.name});
+// John Doe
+
+// Deserialize from binary — same call again.
+const from_binary = try user_serializer.deserialize(
+    arena_allocator,
+    john_binary,
+    .{},
+);
+std.debug.print("{s}\n", .{from_binary.name});
+// John Doe
 ```
 
 ### Primitive serializers
@@ -231,49 +238,69 @@ std.debug.print("{s}\n", .{reserialized_john.name}); // John Doe
 ```zig
 // skir.boolSerializer(), skir.int32Serializer(), etc. return serializers
 // for Zig primitive types.
-try printSerialized("bool", skir.boolSerializer(), true);
-// bool: 1
-try printSerialized("int32", skir.int32Serializer(), @as(i32, 3));
-// int32: 3
-try printSerialized("int64", skir.int64Serializer(), @as(i64, 9_223_372_036_854_775_807));
-// int64: "9223372036854775807"
-try printSerialized("hash64", skir.hash64Serializer(), @as(u64, 18_446_744_073_709_551_615));
-// hash64: "18446744073709551615"
-try printSerialized("timestamp", skir.timestampSerializer(), skir.Timestamp{ .unix_millis = 1_743_682_787_000 });
-// timestamp: 1743682787000
-try printSerialized("float32", skir.float32Serializer(), @as(f32, 3.14));
-// float32: 3.14
-try printSerialized("float64", skir.float64Serializer(), @as(f64, 3.14));
-// float64: 3.14
-try printSerialized("string", skir.stringSerializer(), "Foo");
-// string: "Foo"
-try printSerialized("bytes", skir.bytesSerializer(), @as([]const u8, &.{ 1, 2, 3 }));
-// bytes: "AQID"
-```
-
-Where `printSerialized` is defined as:
-
-```zig
-fn printSerialized(label: []const u8, serializer: anytype, value: @TypeOf(serializer).Value) !void {
-    const allocator = std.heap.page_allocator;
-    const dense = try serializer.serialize(allocator, value, .{ .format = .denseJson });
-    defer allocator.free(dense);
-    std.debug.print("{s}: {s}\n", .{ label, dense });
-}
+_ = try skir.boolSerializer().serialize(
+    arena_allocator,
+    true,
+    .{ .format = .denseJson },
+);
+_ = try skir.int32Serializer().serialize(
+    arena_allocator,
+    @as(i32, 3),
+    .{ .format = .denseJson },
+);
+_ = try skir.int64Serializer().serialize(
+    arena_allocator,
+    @as(i64, 9_223_372_036_854_775_807),
+    .{ .format = .denseJson },
+);
+_ = try skir.hash64Serializer().serialize(
+    arena_allocator,
+    @as(u64, 18_446_744_073_709_551_615),
+    .{ .format = .denseJson },
+);
+_ = try skir.timestampSerializer().serialize(
+    arena_allocator,
+    skir.Timestamp{ .unix_millis = 1_743_682_787_000 },
+    .{ .format = .denseJson },
+);
+_ = try skir.float32Serializer().serialize(
+    arena_allocator,
+    @as(f32, 3.14),
+    .{ .format = .denseJson },
+);
+_ = try skir.float64Serializer().serialize(
+    arena_allocator,
+    @as(f64, 3.14),
+    .{ .format = .denseJson },
+);
+_ = try skir.stringSerializer().serialize(
+    arena_allocator,
+    "Foo",
+    .{ .format = .denseJson },
+);
+_ = try skir.bytesSerializer().serialize(
+    arena_allocator,
+    @as([]const u8, &.{ 1, 2, 3 }),
+    .{ .format = .denseJson },
+);
 ```
 
 ### Composite serializers
 
 ```zig
 const opt_string_ser = skir.optionalSerializer(skir.stringSerializer());
-try printSerialized("optional some", opt_string_ser, @as(?[]const u8, "foo"));
-// optional some: "foo"
-try printSerialized("optional none", opt_string_ser, @as(?[]const u8, null));
-// optional none: null
+_ = try opt_string_ser.serialize(
+    arena_allocator,
+    @as(?[]const u8, null),
+    .{ .format = .denseJson },
+);
 
 const bool_array_ser = skir.arraySerializer(skir.boolSerializer());
-try printSerialized("bool array", bool_array_ser, @as([]const bool, &.{ true, false }));
-// bool array: [1,0]
+_ = try bool_array_ser.serialize(
+    arena_allocator,
+    @as([]const bool, &.{ true, false }),
+    .{ .format = .denseJson },
+);
 ```
 
 ### Constants
@@ -282,28 +309,19 @@ try printSerialized("bool array", bool_array_ser, @as([]const bool, &.{ true, fa
 // Constants declared with 'const' in the .skir file are available as
 // module-level values in the generated Zig file.
 const tarzan = user_mod.tarzan_const;
-std.debug.print("{s}\n", .{tarzan.name}); // Tarzan
+std.debug.print("{s}\n", .{tarzan.name});
+// Tarzan
 
-const tarzan_json = try user_serializer.serialize(allocator, tarzan, .{ .format = .readableJson });
-defer allocator.free(tarzan_json);
+const tarzan_json = try user_serializer.serialize(
+    arena_allocator,
+    tarzan,
+    .{ .format = .readableJson },
+);
 std.debug.print("{s}\n", .{tarzan_json});
 // {
 //   "user_id": 123,
 //   "name": "Tarzan",
-//   "quote": "AAAAaAaAaAyAAAAaAaAaAyAAAAaAaAaA",
-//   "pets": [
-//     {
-//       "name": "Cheeta",
-//       "height_in_meters": 1.67,
-//       "picture": "🐒"
-//     }
-//   ],
-//   "subscription_status": {
-//     "kind": "trial",
-//     "value": {
-//       "start_time": 1743592409000
-//     }
-//   }
+//   ...
 // }
 ```
 
@@ -318,25 +336,26 @@ std.debug.print("{s}\n", .{tarzan_json});
 
 var users = [_]user_mod.User{ john, jane, evil_john, tarzan };
 var registry = user_mod.UserRegistry{
-    .users = skir.KeyedArray(user_mod.User.By_UserId).init(allocator, users[0..]),
+    .users = skir.KeyedArray(user_mod.User.By_UserId).init(
+        arena_allocator,
+        users[0..],
+    ),
     ._unrecognized = null,
 };
-defer registry.users.deinit();
 
-// findByKey returns !?*T.
-// The first lookup runs in O(n); subsequent lookups run in O(1).
-const found_43 = try registry.users.findByKey(43);
-std.debug.print("{}\n", .{found_43 == null}); // true
-
-// If multiple elements share the same key, the last one wins.
-const found_42 = try registry.users.findByKey(42);
-if (found_42) |u| {
-    std.debug.print("{s}\n", .{u.name}); // Evil John
+const found = try registry.users.findByKey(42);
+if (found) |u| {
+    std.debug.print("{s}\n", .{u.name});
+    // Evil John (last duplicate wins)
 }
 
-const maybe_missing = try registry.users.findByKey(999);
-const fallback = maybe_missing orelse &user_mod.User.default;
-std.debug.print("{d}\n", .{fallback.user_id}); // 0
+const not_found = try registry.users.findByKey(43);
+std.debug.print("{}\n", .{not_found == null});
+// true
+
+const found_or_default = try registry.users.findByKeyOrDefault(999);
+std.debug.print("{d}\n", .{found_or_default.pets.len});
+// 0
 ```
 
 ### SkirRPC services
@@ -361,32 +380,23 @@ switch (type_descriptor) {
         // User has 5 fields
         if (sd.fieldByName("name")) |f| {
             std.debug.print("field 'name' number={d}\n", .{f.number});
+            // field 'name' number=1
         }
     },
     else => {},
 }
 
-const enum_type_descriptor = user_mod.SubscriptionStatus.serializer().typeDescriptor();
+const enum_type_descriptor =
+    user_mod.SubscriptionStatus.serializer().typeDescriptor();
 switch (enum_type_descriptor) {
     .enum_record => |ed| {
         std.debug.print("{s} has {d} variants\n", .{ ed.name, ed.variants.len });
-        // SubscriptionStatus has 4 variants
+        // SubscriptionStatus has 3 variants
         if (ed.variantByName("trial")) |variant| {
             std.debug.print("variant trial number={d}\n", .{variant.number()});
+            // variant trial number=2
         }
     },
     else => {},
 }
-```
-
-#### RPC method descriptors
-
-```zig
-const get_user = service_mod.get_user_method();
-std.debug.print("{s}\n", .{get_user.name}); // GetUser
-std.debug.print("{d}\n", .{get_user.number}); // 12345
-std.debug.print("{s}\n", .{get_user.doc});
-
-const add_user = service_mod.add_user_method();
-std.debug.print("{s}\n", .{add_user.name}); // AddUser
 ```
