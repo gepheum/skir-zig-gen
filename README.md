@@ -3,7 +3,8 @@
 
 # Skir's Zig code generator
 
-Official plugin for generating Zig code from [.skir](https://github.com/gepheum/skir) files.
+Official plugin for generating Zig code from
+[.skir](https://github.com/gepheum/skir) files.
 
 ## Set up
 
@@ -14,7 +15,8 @@ In your `skir.yml` file, add the following snippet under `generators`:
     config: {}
 ```
 
-The generated Zig code has a runtime dependency on `skir_client`. Add it to your `build.zig.zon`:
+The generated Zig code has a runtime dependency on `skir_client`.
+Add it to your `build.zig.zon`:
 
 ```zig
 .dependencies = .{
@@ -31,11 +33,14 @@ Then fetch the archive once to get the hash:
 zig fetch https://github.com/gepheum/skir-zig-client/archive/refs/heads/main.tar.gz
 ```
 
-For more information, see this Zig project [example](https://github.com/gepheum/skir-zig-example).
+For more information, see this Zig project
+[example](https://github.com/gepheum/skir-zig-example).
 
 ## Zig generated code guide
 
-The examples below are for the code generated from [this](https://github.com/gepheum/skir-zig-example/blob/main/skir-src/user.skir) .skir file.
+The examples below are for the code generated from
+[this](https://github.com/gepheum/skir-zig-example/blob/main/skir-src/user.skir)
+.skir file.
 
 ### Referring to generated symbols
 
@@ -50,7 +55,9 @@ const skir = @import("skir_client.zig");
 
 ### Struct types
 
-Skir generates a plain Zig struct for every struct in the .skir file. All fields are value types; the struct is not heap-allocated by the generator.
+Skir generates a plain Zig struct for every struct in the .skir file.
+All fields are value types; the struct is not heap-allocated by the
+generator.
 
 ```zig
 // Construct a User by providing all fields.
@@ -152,7 +159,8 @@ std.debug.print("{s}\n", .{subscriptionInfoText(.{ .Trial = &trial_payload })});
 
 ### Serialization
 
-`User.serializer()` returns a serializer which can serialize and deserialize instances of `User`.
+`User.serializer()` returns a serializer which can serialize and
+deserialize instances of `User`.
 
 ```zig
 const user_serializer = user_mod.User.serializer();
