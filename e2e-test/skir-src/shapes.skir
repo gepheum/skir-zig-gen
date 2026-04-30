@@ -23,11 +23,11 @@ struct Triangle {
 
 /// A day of the week.
 enum Weekday {
-  MONDAY;
-  TUESDAY;
-  WEDNESDAY;
-  THURSDAY;
-  FRIDAY;
-  SATURDAY;
-  SUNDAY;
+  monday;
+  tuesday;
+  wednesday;
+  thursday;
+  friday;
+  saturday;
+  sunday;
 }

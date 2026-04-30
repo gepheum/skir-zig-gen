@@ -1,6 +1,6 @@
 {
   "name": "skir-zig-gen",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "",
   "keywords": [],
   "license": "ISC",
@@ -40,7 +40,7 @@
     "eslint": "^10.0.1",
     "prettier": "^3.2.4",
     "prettier-plugin-organize-imports": "^4.2.0",
-    "skir": "^1.1.22",
+    "skir": "^1.2.11",
     "tsx": "^4.21.0",
     "typescript": "^5.2.2",
     "typescript-eslint": "^8.56.0"
