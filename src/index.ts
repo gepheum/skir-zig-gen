@@ -207,7 +207,7 @@ class ZigSourceFileGenerator {
     }
 
     this.push(
-      `_unrecognized: ?_skir_client._UnrecognizedFields(@This()) = null,\n`,
+      `_unrecognized: ?*const _skir_client._UnrecognizedFields(@This()) = null,\n`,
     );
     this.push(`\n`);
     this.push(`pub const default: @This() = .{\n`);
@@ -253,7 +253,7 @@ class ZigSourceFileGenerator {
     }
 
     this.push(
-      `${GENERATED_UNKNOWN_VARIANT_NAME}: _skir_client._UnrecognizedVariant(@This()),\n`,
+      `${GENERATED_UNKNOWN_VARIANT_NAME}: ?*const _skir_client._UnrecognizedVariant(@This()),\n`,
     );
     for (const variant of loc.record.fields) {
       this.push(commentify(docToCommentText(variant.doc)));
@@ -275,7 +275,7 @@ class ZigSourceFileGenerator {
 
     this.push(`\n`);
     this.push(
-      `pub const unknown: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} };\n`,
+      `pub const unknown: @This() = .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = null };\n`,
     );
 
     if (emitKindEnum) {
@@ -350,10 +350,10 @@ class ZigSourceFileGenerator {
     this.push(`${toZigStringLiteral(qualifiedName)},\n`);
     this.push(`${toZigStringLiteral(docToCommentText(loc.record.doc))},\n`);
     this.push(
-      `struct { fn get(x: *const S) ?_skir_client._UnrecognizedFields(S) { return x._unrecognized; } }.get,\n`,
+      `struct { fn get(x: *const S) ?*const _skir_client._UnrecognizedFields(S) { return x._unrecognized; } }.get,\n`,
     );
     this.push(
-      `struct { fn set(x: *S, u: ?_skir_client._UnrecognizedFields(S)) void { x._unrecognized = u; } }.set,\n`,
+      `struct { fn set(x: *S, u: ?*const _skir_client._UnrecognizedFields(S)) void { x._unrecognized = u; } }.set,\n`,
     );
     this.push(`) catch unreachable;\n`);
 
@@ -457,11 +457,11 @@ class ZigSourceFileGenerator {
     this.push(`}\n`);
     this.push(`}.getKindOrdinal,\n`);
     this.push(
-      `struct { fn wrapUnknown(u: _skir_client._UnrecognizedVariant(S)) S { return .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = u }; } }.wrapUnknown,\n`,
+      `struct { fn wrapUnknown(u: ?*const _skir_client._UnrecognizedVariant(S)) S { return .{ .${GENERATED_UNKNOWN_VARIANT_NAME} = u }; } }.wrapUnknown,\n`,
     );
     this.push(`struct {\n`);
     this.push(
-      `fn getUnknown(x: *const S) ?_skir_client._UnrecognizedVariant(S) {\n`,
+      `fn getUnknown(x: *const S) ?*const _skir_client._UnrecognizedVariant(S) {\n`,
     );
     this.push(`return switch (x.*) {\n`);
     this.push(`.${GENERATED_UNKNOWN_VARIANT_NAME} => |u| u,\n`);
@@ -931,7 +931,7 @@ class ZigSourceFileGenerator {
       const variantName = unquoteAndUnescape(value.token.text);
       const declaration = record.record.nameToDeclaration[variantName];
       if (!declaration || declaration.kind !== "field") {
-        return `.{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} }`;
+        return `.{ .${GENERATED_UNKNOWN_VARIANT_NAME} = null }`;
       }
       const zigVariant = toVariantName(declaration.name.text);
       if (declaration.type) {
@@ -957,7 +957,7 @@ class ZigSourceFileGenerator {
     const variantName = unquoteAndUnescape(kindEntry.value.token.text);
     const declaration = record.record.nameToDeclaration[variantName];
     if (!declaration || declaration.kind !== "field") {
-      return `.{ .${GENERATED_UNKNOWN_VARIANT_NAME} = .{} }`;
+      return `.{ .${GENERATED_UNKNOWN_VARIANT_NAME} = null }`;
     }
 
     const zigVariant = toVariantName(declaration.name.text);
